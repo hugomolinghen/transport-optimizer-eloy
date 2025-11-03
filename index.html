@@ -15,6 +15,9 @@
     <!-- Lucide React (UMD) -->
     <script src="https://unpkg.com/lucide-react@0.394.0/dist/lucide-react.umd.js"></script>
 
+    <!-- Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
     <!-- Babel (pour exécuter le JSX directement dans le navigateur) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   </head>
@@ -39,6 +42,14 @@
       } = LUCIDE_GLOBAL;
 
       const { useState, useMemo, useEffect } = React;
+
+      const SUPABASE_URL = 'https://eayhqksztfhyxqhrrnkk.supabase.co';
+      const SUPABASE_ANON_KEY =
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVheWhxa3N6dGZoeXhxaHJybmtrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxOTQwMzksImV4cCI6MjA3Nzc3MDAzOX0.AsWKSQDa9MDpsmvP6i4LOwBJevQfzUyImzt2_8D-o18';
+      const supabaseClient =
+        typeof window !== 'undefined' && window.supabase
+          ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+          : null;
 
       // --- Données de base ---
       const FRENCH_DEPARTMENTS = [
@@ -232,30 +243,162 @@
         const [logs, setLogs] = useState([]);
         const [user, setUser] = useState(null);
         const [loginInput, setLoginInput] = useState('');
-        const [loginError, setLoginError] = useState('');
+        const [password, setPassword] = useState('');
+        const [authError, setAuthError] = useState('');
+        const [authLoading, setAuthLoading] = useState(false);
+        const [showRegistration, setShowRegistration] = useState(false);
+        const [registerIdentifier, setRegisterIdentifier] = useState('');
+        const [registerPassword, setRegisterPassword] = useState('');
+        const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
+        const [registerError, setRegisterError] = useState('');
+        const [registerSuccess, setRegisterSuccess] = useState('');
+        const [registerLoading, setRegisterLoading] = useState(false);
 
-        const normalizedUser = user ? user.toLowerCase() : '';
+        const sanitizeIdentifier = (value) =>
+          value
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, '.')
+            .replace(/[^a-z0-9._-]/g, '');
+        const identifierToEmail = (value) => {
+          const cleaned = sanitizeIdentifier(value);
+          return cleaned ? `${cleaned}@no-email.supabase.local` : '';
+        };
+
+        useEffect(() => {
+          if (!supabaseClient) return;
+
+          let isMounted = true;
+
+          supabaseClient.auth.getSession().then(({ data }) => {
+            if (!isMounted) return;
+            setUser(data.session?.user ?? null);
+          });
+
+          const {
+            data: { subscription }
+          } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+            if (!isMounted) return;
+            setUser(session?.user ?? null);
+          });
+
+          return () => {
+            isMounted = false;
+            subscription?.unsubscribe();
+          };
+        }, []);
+
+        const normalizedUser = user
+          ? (
+              user.user_metadata?.identifiant ||
+              (typeof user.email === 'string' ? user.email.split('@')[0] : '') ||
+              ''
+            ).toLowerCase()
+          : '';
+        const userDisplayName =
+          user?.user_metadata?.identifiant ||
+          user?.email ||
+          'Utilisateur';
         const isAdmin = normalizedUser === 'admin.eloy';
         const canEditTransporters = isAdmin;
         const canViewLogs = isAdmin;
 
-        const handleLogin = (event) => {
+        const handleLogin = async (event) => {
           event.preventDefault();
-          const value = loginInput.trim();
-          if (!value) {
-            setLoginError('Veuillez saisir un identifiant.');
+          setAuthError('');
+          setRegisterSuccess('');
+          const identifier = sanitizeIdentifier(loginInput);
+
+          if (!identifier || !password) {
+            setAuthError('Veuillez saisir un identifiant et un mot de passe.');
             return;
           }
-          setUser(value);
-          setLoginInput('');
-          setLoginError('');
-          setNewTransporter({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
+
+          if (!supabaseClient) {
+            setAuthError('Client Supabase non initialisé.');
+            return;
+          }
+
+          setAuthLoading(true);
+          const { data, error } = await supabaseClient.auth.signInWithPassword({
+            email: identifierToEmail(identifier),
+            password
+          });
+
+          if (error) {
+            setAuthError(error.message);
+          } else {
+            setLoginInput('');
+            setPassword('');
+            setAuthError('');
+            setUser(data?.user ?? null);
+            setNewTransporter({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
+          }
+
+          setAuthLoading(false);
         };
 
-        const handleLogout = () => {
+        const handleRegister = async (event) => {
+          event.preventDefault();
+          setRegisterError('');
+          setRegisterSuccess('');
+
+          const identifier = sanitizeIdentifier(registerIdentifier);
+
+          if (!identifier || !registerPassword || !registerConfirmPassword) {
+            setRegisterError('Veuillez renseigner un identifiant et un mot de passe.');
+            return;
+          }
+
+          if (registerPassword !== registerConfirmPassword) {
+            setRegisterError('La confirmation du mot de passe ne correspond pas.');
+            return;
+          }
+
+          if (!supabaseClient) {
+            setRegisterError('Client Supabase non initialisé.');
+            return;
+          }
+
+          setRegisterLoading(true);
+
+          const { data, error } = await supabaseClient.auth.signUp({
+            email: identifierToEmail(identifier),
+            password: registerPassword,
+            options: {
+              data: {
+                identifiant: identifier,
+                identifiant_original: registerIdentifier.trim()
+              }
+            }
+          });
+
+          if (error) {
+            setRegisterError(error.message);
+          } else {
+            setRegisterSuccess(
+              'Utilisateur créé avec succès. Vous pouvez maintenant vous connecter avec ces identifiants.'
+            );
+            setRegisterIdentifier('');
+            setRegisterPassword('');
+            setRegisterConfirmPassword('');
+            setAuthError('');
+            setShowRegistration(false);
+            setLoginInput(identifier);
+          }
+
+          setRegisterLoading(false);
+        };
+
+        const handleLogout = async () => {
+          if (supabaseClient) {
+            await supabaseClient.auth.signOut();
+          }
           setUser(null);
           setLoginInput('');
-          setLoginError('');
+          setPassword('');
+          setAuthError('');
+          setRegisterSuccess('');
           setNewTransporter({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
         };
 
@@ -417,29 +560,128 @@
                 <div className="flex items-center gap-3 mb-6">
                   <Truck className="text-indigo-600" size={32} />
                   <div>
-                    <h1 className="text-2xl font-bold text-gray-800">Connexion requise</h1>
-                    <p className="text-sm text-gray-500">Veuillez saisir votre identifiant pour accéder à l'outil.</p>
+                    <h1 className="text-2xl font-bold text-gray-800">{showRegistration ? 'Créer un utilisateur' : 'Connexion requise'}</h1>
+                    <p className="text-sm text-gray-500">
+                      {showRegistration
+                        ? "Définissez un identifiant (sans email) et un mot de passe. Un email technique sera généré automatiquement."
+                        : "Connectez-vous avec l'identifiant et le mot de passe créés pour Supabase."}
+                    </p>
                   </div>
                 </div>
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Identifiant</label>
-                    <input
-                      type="text"
-                      value={loginInput}
-                      onChange={(e) => setLoginInput(e.target.value)}
-                      className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                      autoFocus
-                    />
-                    {loginError && <p className="text-sm text-red-600 mt-2">{loginError}</p>}
-                  </div>
+
+                <div className="flex items-center justify-center gap-3 mb-6 text-sm">
                   <button
-                    type="submit"
-                    className="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700"
+                    type="button"
+                    onClick={() => {
+                      setShowRegistration(false);
+                      setRegisterError('');
+                      setRegisterSuccess('');
+                    }}
+                    className={`px-3 py-1 rounded-full border ${
+                      showRegistration ? 'border-gray-200 text-gray-500' : 'border-indigo-500 text-indigo-600 bg-indigo-50'
+                    }`}
                   >
-                    Continuer
+                    Se connecter
                   </button>
-                </form>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRegistration(true);
+                      setAuthError('');
+                      setRegisterError('');
+                      setRegisterSuccess('');
+                    }}
+                    className={`px-3 py-1 rounded-full border ${
+                      showRegistration ? 'border-indigo-500 text-indigo-600 bg-indigo-50' : 'border-gray-200 text-gray-500'
+                    }`}
+                  >
+                    Créer un utilisateur
+                  </button>
+                </div>
+
+                {showRegistration ? (
+                  <form onSubmit={handleRegister} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Identifiant</label>
+                      <input
+                        type="text"
+                        value={registerIdentifier}
+                        onChange={(e) => setRegisterIdentifier(e.target.value)}
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
+                      <input
+                        type="password"
+                        value={registerPassword}
+                        onChange={(e) => setRegisterPassword(e.target.value)}
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Confirmer le mot de passe</label>
+                      <input
+                        type="password"
+                        value={registerConfirmPassword}
+                        onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Un email interne du type <code>identifiant@no-email.supabase.local</code> sera utilisé pour Supabase.
+                      {identifierToEmail(registerIdentifier) && (
+                        <span className="block mt-1">
+                          Email généré : <code>{identifierToEmail(registerIdentifier)}</code>
+                        </span>
+                      )}
+                    </p>
+                    {registerError && <p className="text-sm text-red-600">{registerError}</p>}
+                    {registerSuccess && <p className="text-sm text-green-600">{registerSuccess}</p>}
+                    <button
+                      type="submit"
+                      className="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                      disabled={registerLoading}
+                    >
+                      {registerLoading ? 'Création en cours...' : 'Créer cet utilisateur'}
+                    </button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleLogin} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Identifiant</label>
+                      <input
+                        type="text"
+                        value={loginInput}
+                        onChange={(e) => setLoginInput(e.target.value)}
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Utilisez l'identifiant défini lors de la création (sans ajouter d'email).
+                    </p>
+                    {registerSuccess && <p className="text-sm text-green-600">{registerSuccess}</p>}
+                    {authError && <p className="text-sm text-red-600">{authError}</p>}
+                    <button
+                      type="submit"
+                      className="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                      disabled={authLoading}
+                    >
+                      {authLoading ? 'Connexion...' : 'Se connecter'}
+                    </button>
+                  </form>
+                )}
               </div>
             </div>
           );
@@ -460,7 +702,7 @@
                   </div>
                   <div className="flex items-center gap-3 self-end md:self-auto">
                     <div className="text-sm text-gray-500">
-                      Connecté en tant que <span className="font-semibold text-gray-700">{user}</span>
+                      Connecté en tant que <span className="font-semibold text-gray-700">{userDisplayName}</span>
                       {!isAdmin && <span className="block text-xs text-amber-600">Mode lecture seule</span>}
                     </div>
                     <button
