@@ -15,6 +15,9 @@
     <!-- Lucide React (UMD) -->
     <script src="https://unpkg.com/lucide-react@0.394.0/dist/lucide-react.umd.js"></script>
 
+    <!-- Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
     <!-- Babel (pour exécuter le JSX directement dans le navigateur) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   </head>
@@ -39,6 +42,14 @@
       } = LUCIDE_GLOBAL;
 
       const { useState, useMemo, useEffect } = React;
+
+      const SUPABASE_URL = 'https://eayhqksztfhyxqhrrnkk.supabase.co';
+      const SUPABASE_ANON_KEY =
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVheWhxa3N6dGZoeXhxaHJybmtrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxOTQwMzksImV4cCI6MjA3Nzc3MDAzOX0.AsWKSQDa9MDpsmvP6i4LOwBJevQfzUyImzt2_8D-o18';
+      const supabaseClient =
+        typeof window !== 'undefined' && window.supabase
+          ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+          : null;
 
       // --- Données de base ---
       const FRENCH_DEPARTMENTS = [
@@ -232,30 +243,90 @@
         const [logs, setLogs] = useState([]);
         const [user, setUser] = useState(null);
         const [loginInput, setLoginInput] = useState('');
-        const [loginError, setLoginError] = useState('');
+        const [password, setPassword] = useState('');
+        const [authError, setAuthError] = useState('');
+        const [authLoading, setAuthLoading] = useState(false);
 
-        const normalizedUser = user ? user.toLowerCase() : '';
+        useEffect(() => {
+          if (!supabaseClient) return;
+
+          let isMounted = true;
+
+          supabaseClient.auth.getSession().then(({ data }) => {
+            if (!isMounted) return;
+            setUser(data.session?.user ?? null);
+          });
+
+          const {
+            data: { subscription }
+          } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+            if (!isMounted) return;
+            setUser(session?.user ?? null);
+          });
+
+          return () => {
+            isMounted = false;
+            subscription?.unsubscribe();
+          };
+        }, []);
+
+        const normalizedUser = user
+          ? (
+              user.user_metadata?.identifiant ||
+              (typeof user.email === 'string' ? user.email.split('@')[0] : '') ||
+              ''
+            ).toLowerCase()
+          : '';
+        const userDisplayName =
+          user?.user_metadata?.identifiant ||
+          user?.email ||
+          'Utilisateur';
         const isAdmin = normalizedUser === 'admin.eloy';
         const canEditTransporters = isAdmin;
         const canViewLogs = isAdmin;
 
-        const handleLogin = (event) => {
+        const handleLogin = async (event) => {
           event.preventDefault();
-          const value = loginInput.trim();
-          if (!value) {
-            setLoginError('Veuillez saisir un identifiant.');
+          setAuthError('');
+          const identifier = loginInput.trim();
+
+          if (!identifier || !password) {
+            setAuthError('Veuillez saisir un identifiant et un mot de passe.');
             return;
           }
-          setUser(value);
-          setLoginInput('');
-          setLoginError('');
-          setNewTransporter({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
+
+          if (!supabaseClient) {
+            setAuthError('Client Supabase non initialisé.');
+            return;
+          }
+
+          setAuthLoading(true);
+          const { data, error } = await supabaseClient.auth.signInWithPassword({
+            email: identifier,
+            password
+          });
+
+          if (error) {
+            setAuthError(error.message);
+          } else {
+            setLoginInput('');
+            setPassword('');
+            setAuthError('');
+            setUser(data?.user ?? null);
+            setNewTransporter({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
+          }
+
+          setAuthLoading(false);
         };
 
-        const handleLogout = () => {
+        const handleLogout = async () => {
+          if (supabaseClient) {
+            await supabaseClient.auth.signOut();
+          }
           setUser(null);
           setLoginInput('');
-          setLoginError('');
+          setPassword('');
+          setAuthError('');
           setNewTransporter({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
         };
 
@@ -418,7 +489,9 @@
                   <Truck className="text-indigo-600" size={32} />
                   <div>
                     <h1 className="text-2xl font-bold text-gray-800">Connexion requise</h1>
-                    <p className="text-sm text-gray-500">Veuillez saisir votre identifiant pour accéder à l'outil.</p>
+                    <p className="text-sm text-gray-500">
+                      Veuillez saisir votre identifiant Supabase (email) et votre mot de passe pour accéder à l'outil.
+                    </p>
                   </div>
                 </div>
                 <form onSubmit={handleLogin} className="space-y-4">
@@ -431,13 +504,23 @@
                       className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                       autoFocus
                     />
-                    {loginError && <p className="text-sm text-red-600 mt-2">{loginError}</p>}
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  {authError && <p className="text-sm text-red-600">{authError}</p>}
                   <button
                     type="submit"
-                    className="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700"
+                    className="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                    disabled={authLoading}
                   >
-                    Continuer
+                    {authLoading ? 'Connexion...' : 'Se connecter'}
                   </button>
                 </form>
               </div>
@@ -460,7 +543,7 @@
                   </div>
                   <div className="flex items-center gap-3 self-end md:self-auto">
                     <div className="text-sm text-gray-500">
-                      Connecté en tant que <span className="font-semibold text-gray-700">{user}</span>
+                      Connecté en tant que <span className="font-semibold text-gray-700">{userDisplayName}</span>
                       {!isAdmin && <span className="block text-xs text-amber-600">Mode lecture seule</span>}
                     </div>
                     <button
