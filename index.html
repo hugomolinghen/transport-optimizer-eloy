@@ -5,819 +5,407 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Optimiseur de Transporteur</title>
 
-    <!-- TailwindCSS -->
+    <!-- ✅ TailwindCSS pour le style -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- React 18 UMD -->
+    <!-- ✅ React 18 (UMD) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 
-    <!-- Lucide React (UMD) -->
+    <!-- ✅ Icônes Lucide -->
     <script src="https://unpkg.com/lucide-react@0.394.0/dist/lucide-react.umd.js"></script>
 
-    <!-- Supabase JS -->
+    <!-- ✅ Supabase JS -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-    <!-- Babel (pour exécuter le JSX directement dans le navigateur) -->
+    <!-- ✅ Babel (pour exécuter le JSX directement dans le navigateur) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   </head>
+
   <body class="bg-gradient-to-br from-blue-50 to-indigo-50 min-h-screen">
     <div id="root"></div>
 
     <script type="text/babel">
-      // ========= Correctifs de robustesse =========
-      // 1) Lucide UMD peut ne pas exposer "lucideReact" selon la version/CDN.
-      //    On prend la référence globale si dispo, sinon on fournit des composants vides pour éviter les crashs.
-      const LUCIDE_GLOBAL = (typeof window !== 'undefined' && (window.lucideReact || window.LucideReact)) || {};
-      const NullIcon = (props) => null;
-      const {
-        Truck = NullIcon,
-        Calculator = NullIcon,
-        AlertCircle = NullIcon,
-        MapPin = NullIcon,
-        Search = NullIcon,
-      } = LUCIDE_GLOBAL;
+      /********************************************
+       *  CONFIGURATION SUPABASE
+       ********************************************/
+      // 👉 Remplace ces deux variables par les tiennes
+      const SUPABASE_URL = "https://eayhqksztfhyxqhrrnkk.supabase.co";
+      const SUPABASE_ANON_KEY = "TA_CLE_SUPABASE_ICI"; // ← à remplir
 
-      const { useState, useMemo, useEffect } = React;
+      // ✅ Initialisation sécurisée du client Supabase
+      const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-      const SUPABASE_URL = 'https://eayhqksztfhyxqhrrnkk.supabase.co';
-      const SUPABASE_ANON_KEY =
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVheWhxa3N6dGZoeXhxaHJybmtrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxOTQwMzksImV4cCI6MjA3Nzc3MDAzOX0.AsWKSQDa9MDpsmvP6i4LOwBJevQfzUyImzt2_8D-o18';
-      const supabaseClient =
-        typeof window !== 'undefined' && window.supabase
-          ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-          : null;
+      /********************************************
+       *  COMPOSANT PRINCIPAL REACT
+       ********************************************/
+      const { useState, useEffect, useMemo } = React;
+      const { Truck, MapPin, Calculator, Search, AlertCircle } =
+        window.lucideReact || window.LucideReact || {};
 
-      // --- Données de base ---
-      // Calcul d'itinéraire optimal (plus proche -> plus éloigné, en terminant par le plus loin)
-      const calculateOptimalRoute = (selectedDeptIds, departments) => {
-        if (selectedDeptIds.length === 0) return [];
-        const toNumber = (value) => {
-          const numeric = Number(value);
-          return Number.isFinite(numeric) ? numeric : 0;
-        };
-        const selectedDepts = selectedDeptIds
-          .map(id => departments.find(d => d.id === id))
-          .filter(Boolean);
-        if (selectedDepts.length <= 1) return selectedDepts;
-        const farthest = selectedDepts.reduce((max, dept) => (toNumber(dept.km) > toNumber(max.km) ? dept : max));
-        const others = selectedDepts
-          .filter(d => d.id !== farthest.id)
-          .sort((a, b) => toNumber(a.km) - toNumber(b.km));
-        return [...others, farthest];
-      };
+      /********************************************
+       *  FONCTION: Calcul d’un itinéraire optimal
+       *  (départements triés du plus proche au plus éloigné)
+       ********************************************/
+      function calculateOptimalRoute(selectedDeptIds, departments) {
+        if (!selectedDeptIds.length) return [];
+        const list = selectedDeptIds
+          .map((id) => departments.find((d) => d.id === id))
+          .filter(Boolean)
+          .sort((a, b) => a.km - b.km);
+        return list;
+      }
 
-      // Helpers
-      const currentYear = new Date().getFullYear();
-      const BORDEREAU_REGEX = new RegExp(`^23\/${currentYear}\/([1-9]\d{0,3})$`);
-
+      /********************************************
+       *  COMPOSANT PRINCIPAL
+       ********************************************/
       function TransportOptimizer() {
         const [departments, setDepartments] = useState([]);
-        const [departmentsLoading, setDepartmentsLoading] = useState(true);
-        const [departmentsError, setDepartmentsError] = useState('');
-
-        // Deux types de camions: baché (tarps) et plateau (flatbed)
-        const [truckType, setTruckType] = useState(''); // 'tarps' | 'flatbed'
-
-        // Bordereau obligatoire
-        const [bordereau, setBordereau] = useState('');
-        const [bordereauTouched, setBordereauTouched] = useState(false);
-
         const [transporters, setTransporters] = useState([]);
-        const [transportersLoading, setTransportersLoading] = useState(true);
-        const [transportersError, setTransportersError] = useState('');
-
+        const [loading, setLoading] = useState(true);
+        const [error, setError] = useState("");
         const [selectedDepts, setSelectedDepts] = useState([]);
-        const [searchTerm, setSearchTerm] = useState('');
+        const [truckType, setTruckType] = useState(""); // "bache" ou "plateau"
+        const [bordereau, setBordereau] = useState("");
         const [hasSearched, setHasSearched] = useState(false);
 
-        const [user, setUser] = useState(null);
-        const [loginInput, setLoginInput] = useState('');
-        const [password, setPassword] = useState('');
-        const [authError, setAuthError] = useState('');
-        const [authLoading, setAuthLoading] = useState(false);
+        const currentYear = new Date().getFullYear();
+        const BORDEREAU_REGEX = new RegExp(`^23/${currentYear}/([1-9]\\d{0,3})$`);
 
+        /********************************************
+         *  CHARGEMENT DES DONNÉES SUPABASE
+         ********************************************/
         useEffect(() => {
-          let isMounted = true;
+          async function loadData() {
+            try {
+              setLoading(true);
+              setError("");
 
-          const loadDepartments = async () => {
-            if (!supabaseClient) {
-              if (!isMounted) return;
-              setDepartments([]);
-              setDepartmentsError('Client Supabase non initialisé.');
-              setDepartmentsLoading(false);
-              return;
-            }
+              // 🔹 Requête principale : lecture directe de la vue
+              const { data, error } = await supabase
+                .from("v_tarifs_complets")
+                .select(
+                  "transporteur_id, transporteur_nom, break_of_charge, break_of_charge_cost, departement_code, departement_nom, km_depuis_sprimont, prix_bache, prix_plateau"
+                );
 
-            setDepartmentsLoading(true);
-            const tableCandidates = ['departements', 'départements'];
-            let fetchedData = [];
-            let fetchError = null;
+              if (error) throw error;
 
-            for (const tableName of tableCandidates) {
-              const { data, error } = await supabaseClient
-                .from(tableName)
-                .select('id, code, name, km')
-                .order('code', { ascending: true });
+              console.log("✅ Données récupérées :", data);
 
-              if (!error) {
-                fetchedData = data || [];
-                fetchError = null;
-                break;
+              if (!data || data.length === 0) {
+                setError("Aucune donnée trouvée dans la vue v_tarifs_complets.");
+                setDepartments([]);
+                setTransporters([]);
+                return;
               }
 
-              fetchError = error;
-              console.warn(`[Departements] Tentative sur ${tableName} échouée`, error);
-            }
-
-            if (!isMounted) return;
-
-            if (fetchError) {
-              console.error('[Departements] Chargement impossible', fetchError);
-              setDepartments([]);
-              setDepartmentsError("Impossible de charger les départements depuis Supabase.");
-            } else {
-              setDepartments(Array.isArray(fetchedData) ? fetchedData : []);
-              setDepartmentsError('');
-            }
-
-            setDepartmentsLoading(false);
-          };
-
-          loadDepartments();
-
-          return () => {
-            isMounted = false;
-          };
-        }, []);
-
-        useEffect(() => {
-          setSelectedDepts(prev => prev.filter(id => departments.some(dept => dept.id === id)));
-        }, [departments]);
-
-        const departmentMap = useMemo(() => {
-          const map = new Map();
-          departments.forEach(dept => {
-            map.set(dept.id, dept);
-          });
-          return map;
-        }, [departments]);
-
-        const departmentByCode = useMemo(() => {
-          const map = new Map();
-          departments.forEach(dept => {
-            map.set(dept.code, dept);
-          });
-          return map;
-        }, [departments]);
-
-        useEffect(() => {
-          if (!supabaseClient) {
-            setTransporters([]);
-            setTransportersError('Client Supabase non initialisé.');
-            setTransportersLoading(false);
-            return;
-          }
-
-          if (departments.length === 0) {
-            setTransporters([]);
-            setTransportersError('');
-            setTransportersLoading(false);
-            return;
-          }
-
-          let isMounted = true;
-
-          const loadTransporters = async () => {
-            setTransportersLoading(true);
-            const { data, error } = await supabaseClient
-              .from('v_tarifs_complets')
-              .select('departement_code, transporteur_nom, prix_bache, prix_plateau, km_depuis_sprimont')
-              .order('transporteur_nom', { ascending: true })
-              .order('departement_code', { ascending: true });
-
-            if (!isMounted) return;
-
-            if (error) {
-              console.error('[Transporteurs] Chargement impossible', error);
-              setTransporters([]);
-              setTransportersError("Impossible de charger les transporteurs depuis Supabase.");
-            } else {
-              const transporterMap = new Map();
-              const toNumber = (value) => {
-                const numeric = Number(value);
-                return Number.isFinite(numeric) ? numeric : 0;
-              };
-
-              (data || []).forEach(row => {
-                const dept = departmentByCode.get(row.department_code);
-                if (!dept) return;
-
-                const transporterName = row.transporteur_nom || 'Transporteur';
-                if (!transporterMap.has(transporterName)) {
-                  transporterMap.set(transporterName, {
-                    id: transporterName,
-                    name: transporterName,
-                    hasBreakOfCharge: false,
-                    breakOfChargeCost: 0,
-                    rates: []
+              // 🧩 Construction des départements uniques
+              const deptMap = new Map();
+              data.forEach((row, index) => {
+                if (!deptMap.has(row.departement_code)) {
+                  deptMap.set(row.departement_code, {
+                    id: index + 1,
+                    code: row.departement_code,
+                    name: row.departement_nom,
+                    km: row.km_depuis_sprimont,
                   });
                 }
+              });
+              const deptList = Array.from(deptMap.values()).sort((a, b) =>
+                a.code.localeCompare(b.code, "fr", { numeric: true })
+              );
 
-                const transporter = transporterMap.get(transporterName);
-                transporter.rates.push({
-                  deptId: dept.id,
-                  departmentCode: dept.code,
-                  tarpsCost: toNumber(row.prix_bache),
-                  flatbedCost: toNumber(row.prix_plateau),
-                  kmFromSprimont: toNumber(row.km_depuis_sprimont)
-                });
+              // 🧩 Construction des transporteurs
+              const transpMap = new Map();
+              data.forEach((row) => {
+                if (!transpMap.has(row.transporteur_nom)) {
+                  transpMap.set(row.transporteur_nom, {
+                    id: row.transporteur_id,
+                    name: row.transporteur_nom,
+                    hasBreakOfCharge: row.break_of_charge || false,
+                    breakOfChargeCost: row.break_of_charge_cost || 0,
+                    rates: [],
+                  });
+                }
+                const transporter = transpMap.get(row.transporteur_nom);
+                const dept = deptMap.get(row.departement_code);
+                if (dept) {
+                  transporter.rates.push({
+                    deptId: dept.id,
+                    departmentCode: dept.code,
+                    tarpsCost: row.prix_bache,
+                    flatbedCost: row.prix_plateau,
+                    kmFromSprimont: row.km_depuis_sprimont,
+                  });
+                }
               });
 
-              const normalizedTransporters = Array.from(transporterMap.values()).map((transporter) => ({
-                ...transporter,
-                rates: transporter.rates
-                  .slice()
-                  .sort((a, b) => {
-                    const codeA = a.departmentCode || '';
-                    const codeB = b.departmentCode || '';
-                    return codeA.localeCompare(codeB, 'fr', { numeric: true, sensitivity: 'base' });
-                  })
-              }));
-
-              setTransporters(normalizedTransporters);
-              setTransportersError('');
+              setDepartments(deptList);
+              setTransporters(Array.from(transpMap.values()));
+            } catch (err) {
+              console.error("❌ Erreur Supabase :", err);
+              setError(err.message || "Erreur inconnue");
+            } finally {
+              setLoading(false);
             }
+          }
 
-            setTransportersLoading(false);
-          };
-
-          loadTransporters();
-
-          return () => {
-            isMounted = false;
-          };
-        }, [departments, departmentByCode]);
-
-        useEffect(() => {
-          if (!supabaseClient) return;
-
-          let isMounted = true;
-
-          supabaseClient.auth.getSession().then(({ data }) => {
-            if (!isMounted) return;
-            setUser(data.session?.user ?? null);
-          });
-
-          const {
-            data: { subscription }
-          } = supabaseClient.auth.onAuthStateChange((_event, session) => {
-            if (!isMounted) return;
-            setUser(session?.user ?? null);
-          });
-
-          return () => {
-            isMounted = false;
-            subscription?.unsubscribe();
-          };
+          loadData();
         }, []);
 
-        const userDisplayName =
-          user?.user_metadata?.identifiant ||
-          user?.email ||
-          'Utilisateur';
+        /********************************************
+         *  CALCUL DU MEILLEUR TRANSPORTEUR
+         ********************************************/
+        const optimalRoute = useMemo(
+          () => calculateOptimalRoute(selectedDepts, departments),
+          [selectedDepts, departments]
+        );
 
-        const handleLogin = async (event) => {
-          event.preventDefault();
-          setAuthError('');
-          const identifier = loginInput.trim();
+        const bestTransporters = useMemo(() => {
+          if (!selectedDepts.length || !truckType || !transporters.length) return [];
 
-          if (!identifier || !password) {
-            setAuthError('Veuillez saisir un identifiant et un mot de passe.');
-            return;
-          }
-
-          if (!supabaseClient) {
-            setAuthError('Client Supabase non initialisé.');
-            return;
-          }
-
-          setAuthLoading(true);
-          const { data, error } = await supabaseClient.auth.signInWithPassword({
-            email: identifier,
-            password
-          });
-
-          if (error) {
-            setAuthError(error.message);
-          } else {
-            setLoginInput('');
-            setPassword('');
-            setAuthError('');
-            setUser(data?.user ?? null);
-          }
-
-          setAuthLoading(false);
-        };
-
-        const handleLogout = async () => {
-          if (supabaseClient) {
-            await supabaseClient.auth.signOut();
-          }
-          setUser(null);
-          setLoginInput('');
-          setPassword('');
-          setAuthError('');
-        };
-
-        const filteredDepartments = useMemo(() => {
-          return departments.filter(d =>
-            d.name.toLowerCase().includes(searchTerm.toLowerCase()) || d.code.includes(searchTerm)
-          );
-        }, [departments, searchTerm]);
-
-        const optimalRoute = useMemo(() => calculateOptimalRoute(selectedDepts, departments), [selectedDepts, departments]);
-
-        const calculateBestTransporter = useMemo(() => {
-          if (selectedDepts.length === 0 || !truckType || transporters.length === 0) return [];
-          const route = optimalRoute;
-
-          const results = transporters.map(transporter => {
+          const results = transporters.map((transporter) => {
             let totalCost = 0;
             const details = [];
 
-            if (transporter.hasBreakOfCharge && route.length > 1) {
-              totalCost += transporter.breakOfChargeCost;
-              details.push(`Rupture de charge: ${transporter.breakOfChargeCost}€`);
-
-              const farthestDept = route[route.length - 1];
-              const farthestRate = transporter.rates.find(r => r.deptId === farthestDept.id);
-              if (farthestRate) {
-                const cost = truckType === 'tarps' ? farthestRate.tarpsCost : farthestRate.flatbedCost;
+            optimalRoute.forEach((dept, idx) => {
+              const rate = transporter.rates.find((r) => r.deptId === dept.id);
+              if (rate) {
+                const cost =
+                  truckType === "bache" ? rate.tarpsCost : rate.flatbedCost;
                 totalCost += cost;
-                details.push(`${farthestDept.name} (${farthestDept.km}km): ${cost}€`);
+                details.push(
+                  `${idx + 1}. ${dept.name} (${dept.km} km): ${cost.toFixed(2)}€`
+                );
               }
+            });
 
-              for (let i = 0; i < route.length - 1; i++) {
-                const dept = route[i];
-                const rate = transporter.rates.find(r => r.deptId === dept.id);
-                if (rate) {
-                  const base = truckType === 'tarps' ? rate.tarpsCost : rate.flatbedCost;
-                  const adjustedCost = base * 0.7; // réduction après rupture
-                  totalCost += adjustedCost;
-                  details.push(`${dept.name} (depuis rupture): ${adjustedCost.toFixed(2)}€`);
-                }
-              }
-            } else {
-              route.forEach((dept, index) => {
-                const rate = transporter.rates.find(r => r.deptId === dept.id);
-                if (rate) {
-                  const cost = truckType === 'tarps' ? rate.tarpsCost : rate.flatbedCost;
-                  totalCost += cost;
-                  details.push(`${index + 1}. ${dept.name} (${dept.km}km): ${cost}€`);
-                }
-              });
+            if (transporter.hasBreakOfCharge) {
+              totalCost += transporter.breakOfChargeCost;
+              details.push(`+ Rupture de charge : ${transporter.breakOfChargeCost}€`);
             }
 
             return { transporter, totalCost, details };
           });
 
           return results.sort((a, b) => a.totalCost - b.totalCost);
-        }, [transporters, selectedDepts, optimalRoute, truckType]);
+        }, [optimalRoute, transporters, truckType]);
 
-        // Validation bordereau
-        const isBordereauValid = BORDEREAU_REGEX.test(bordereau);
-
-        // Recherche (calcul + log)
-        const onSearch = () => {
-          setBordereauTouched(true);
-          if (!isBordereauValid || !truckType || selectedDepts.length === 0) return;
-          setHasSearched(true);
-        };
-
-        // ================== Petit panneau de tests (auto-tests) ==================
-        const [selfTests, setSelfTests] = useState([]);
-        useEffect(() => {
-          const YEAR = new Date().getFullYear();
-          const dataset = departments;
-          const results = [];
-
-          const sampleShort = `23/${YEAR}/1`;
-          const sampleLong = `23/${YEAR}/1234`;
-          const sampleInvalid = `23/${YEAR}/12345`;
-
-          const validShort = BORDEREAU_REGEX.test(sampleShort);
-          const validLong = BORDEREAU_REGEX.test(sampleLong);
-          const invalidLong = !BORDEREAU_REGEX.test(sampleInvalid);
-
-          results.push({ name: 'Bordereau valide court', pass: validShort, expected: true, got: validShort });
-          results.push({ name: 'Bordereau valide 4 chiffres', pass: validLong, expected: true, got: validLong });
-          results.push({ name: 'Bordereau invalide 5 chiffres', pass: invalidLong, expected: true, got: invalidLong });
-
-          if (dataset.length >= 2) {
-            const first = dataset[0];
-            const last = dataset[dataset.length - 1];
-            const route = calculateOptimalRoute([first.id, last.id], dataset);
-            const farthestKm = route.reduce((max, dept) => {
-              const km = Number(dept?.km) || 0;
-              return km > max ? km : max;
-            }, 0);
-            const lastKm = Number(route[route.length - 1]?.km) || 0;
-            const endsWithFarthest = route.length >= 1 && Math.abs(lastKm - farthestKm) < 1e-6;
-            results.push({
-              name: 'Itinéraire termine par plus éloigné',
-              pass: endsWithFarthest,
-              expected: true,
-              got: endsWithFarthest
-            });
-          }
-
-          const allPass = results.every(t => t.pass);
-          setSelfTests(results.map(t => ({ name: t.name, result: t.pass, expected: t.expected, got: t.got })));
-          console.log('[SelfTests]', { pass: allPass, details: results });
-        }, [departments]);
-
-        if (!user) {
+        /********************************************
+         *  INTERFACE UTILISATEUR
+         ********************************************/
+        if (loading)
           return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 p-4">
-              <div className="bg-white shadow-xl rounded-2xl p-8 w-full max-w-md">
-                <div className="flex items-center gap-3 mb-6">
-                  <Truck className="text-indigo-600" size={32} />
-                  <div>
-                    <h1 className="text-2xl font-bold text-gray-800">Connexion requise</h1>
-                    <p className="text-sm text-gray-500">
-                      Veuillez saisir votre identifiant Supabase (email) et votre mot de passe pour accéder à l'outil.
-                    </p>
-                  </div>
-                </div>
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Identifiant</label>
-                    <input
-                      type="text"
-                      value={loginInput}
-                      onChange={(e) => setLoginInput(e.target.value)}
-                      className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                      autoFocus
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </div>
-                  {authError && <p className="text-sm text-red-600">{authError}</p>}
-                  <button
-                    type="submit"
-                    className="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-60"
-                    disabled={authLoading}
-                  >
-                    {authLoading ? 'Connexion...' : 'Se connecter'}
-                  </button>
-                </form>
+            <div className="flex items-center justify-center h-screen text-gray-600">
+              <p>Chargement des données depuis Supabase...</p>
+            </div>
+          );
+
+        if (error)
+          return (
+            <div className="flex items-center justify-center h-screen text-red-600 text-center">
+              <div>
+                <p className="font-semibold mb-2">❌ Erreur :</p>
+                <p>{error}</p>
               </div>
             </div>
           );
-        }
 
         return (
-          <div className="min-h-screen p-8">
-            <div className="max-w-7xl mx-auto">
-              {/* Header */}
-              <div className="bg-white rounded-xl shadow-lg p-8 mb-8">
-                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
-                  <div className="flex items-center gap-3">
-                    <Truck className="text-indigo-600" size={32} />
-                    <div>
-                      <h1 className="text-3xl font-bold text-gray-800">Optimiseur de Transporteur</h1>
-                      <p className="text-sm text-gray-500">Depuis Eloywater SA, Sprimont, Belgique</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 self-end md:self-auto">
-                    <div className="text-sm text-gray-500">
-                      Connecté en tant que <span className="font-semibold text-gray-700">{userDisplayName}</span>
-                    </div>
-                    <button
-                      onClick={handleLogout}
-                      className="px-4 py-2 border rounded-lg text-sm font-semibold hover:bg-gray-50"
-                    >
-                      Déconnexion
-                    </button>
-                  </div>
-                </div>
-                <p className="text-gray-600 mt-6">Trouvez automatiquement le transporteur le moins cher avec itinéraire optimisé</p>
-              </div>
-
-              {/* Zone critères & sélection */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-                {/* Critères globaux */}
-                <div className="bg-white rounded-xl shadow-lg p-6">
-                  <h2 className="text-xl font-bold text-gray-800 mb-4">Critères</h2>
-
-                  {/* Bordereau */}
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Bordereau <span className="text-red-600">*</span></label>
-                  <input
-                    type="text"
-                    placeholder={`23/${currentYear}/####`}
-                    value={bordereau}
-                    onChange={(e) => setBordereau(e.target.value)}
-                    onBlur={() => setBordereauTouched(true)}
-                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 mb-2 ${
-                      bordereauTouched && !isBordereauValid ? 'border-red-400 focus:ring-red-300' : 'focus:ring-indigo-500'
-                    }`}
-                  />
-                  {bordereauTouched && !isBordereauValid && (
-                    <div className="flex items-center gap-2 text-red-600 text-sm mb-4">
-                      <AlertCircle size={16} />
-                      <span>Format attendu : <code className="bg-red-50 px-1 rounded">23/{currentYear}/n</code> (n = 1 à 4 chiffres).</span>
-                    </div>
-                  )}
-
-                  {/* Type de camion */}
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Type de camion <span className="text-red-600">*</span></label>
-                  <div className="flex items-center gap-3 mb-4">
-                    <label className={`px-3 py-2 border rounded-lg cursor-pointer ${truckType === 'tarps' ? 'bg-indigo-50 border-indigo-400' : 'bg-white'}`}>
-                      <input type="radio" name="truckType" value="tarps" className="mr-2" onChange={(e) => setTruckType(e.target.value)} checked={truckType==='tarps'} />
-                      Baché
-                    </label>
-                    <label className={`px-3 py-2 border rounded-lg cursor-pointer ${truckType === 'flatbed' ? 'bg-indigo-50 border-indigo-400' : 'bg-white'}`}>
-                      <input type="radio" name="truckType" value="flatbed" className="mr-2" onChange={(e) => setTruckType(e.target.value)} checked={truckType==='flatbed'} />
-                      Plateau
-                    </label>
-                  </div>
-
-                  <button
-                    onClick={onSearch}
-                    className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-60"
-                    disabled={!isBordereauValid || !truckType || selectedDepts.length === 0 || departmentsLoading || transportersLoading || transporters.length === 0}
-                    title={!isBordereauValid
-                      ? 'Bordereau requis'
-                      : !truckType
-                      ? 'Type de camion requis'
-                      : selectedDepts.length === 0
-                      ? 'Sélectionnez au moins un département'
-                      : departmentsLoading
-                      ? 'Chargement des départements en cours'
-                      : transportersLoading
-                      ? 'Chargement des transporteurs en cours'
-                      : transporters.length === 0
-                      ? 'Aucun transporteur disponible'
-                      : 'Lancer la recherche'}
-                  >
-                    <Search size={18} /> Rechercher
-                  </button>
-
-                  {(!isBordereauValid || !truckType || selectedDepts.length === 0) && (
-                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-3">
-                      Renseignez le bordereau, le type de camion et au moins un département pour activer la recherche.
-                    </p>
-                  )}
-                </div>
-
-                {/* Sélection des Départements */}
-                <div className="bg-white rounded-xl shadow-lg p-6 lg:col-span-2">
-                  <h2 className="text-xl font-bold text-gray-800 mb-4">Départements à livrer</h2>
-
-                  <input
-                    type="text"
-                    placeholder="Rechercher (nom ou code)..."
-                    className="w-full px-4 py-2 border rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    disabled={departmentsLoading}
-                  />
-
-                  {departmentsError && !departmentsLoading && (
-                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 mb-4">
-                      {departmentsError}
-                    </p>
-                  )}
-
-                  <div className="mb-4 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
-                    <strong>Sélectionnés:</strong> {selectedDepts.length} département(s)
-                  </div>
-
-                  {departmentsLoading ? (
-                    <p className="text-sm text-gray-500">Chargement des départements...</p>
-                  ) : (
-                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-96 overflow-y-auto">
-                      {filteredDepartments.length === 0 ? (
-                        <p className="text-sm text-gray-500 col-span-full">Aucun département ne correspond à la recherche.</p>
-                      ) : (
-                        filteredDepartments.map(dept => (
-                          <div key={dept.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
-                            <div className="flex items-center gap-3 flex-1">
-                              <input
-                                type="checkbox"
-                                checked={selectedDepts.includes(dept.id)}
-                                onChange={(e) => {
-                                  if (departmentsLoading) return;
-                                  if (e.target.checked) setSelectedDepts([...selectedDepts, dept.id]);
-                                  else setSelectedDepts(selectedDepts.filter(id => id !== dept.id));
-                                }}
-                                className="w-4 h-4 text-indigo-600"
-                                disabled={departmentsLoading}
-                              />
-                              <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">{dept.code}</span>
-                              <span className="font-medium flex-1">{dept.name}</span>
-                              <span className="text-sm text-gray-500 font-mono">{dept.km} km</span>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Gestion des Transporteurs */}
-              <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-                <h2 className="text-xl font-bold text-gray-800 mb-4">Transporteurs</h2>
-
-                {departmentsError && (
-                  <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 mb-4">
-                    {departmentsError}
-                  </p>
-                )}
-
-                {transportersError && !transportersLoading && (
-                  <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 mb-4">
-                    {transportersError}
-                  </p>
-                )}
-
-                {departmentsLoading ? (
-                  <p className="text-sm text-gray-500">Chargement des départements...</p>
-                ) : transportersLoading ? (
-                  <p className="text-sm text-gray-500">Chargement des transporteurs...</p>
-                ) : (
-                  <>
-                    <p className="text-sm text-gray-500 mb-4">
-                      Tarifs synchronisés depuis Supabase (vue{' '}
-                      <code className="bg-gray-100 px-1 rounded">v_tarifs_complets</code>).
-                    </p>
-                    <div className="space-y-4 max-h-[30rem] overflow-y-auto pr-1">
-                      {transporters.length === 0 ? (
-                        <p className="text-gray-600">Aucun transporteur disponible.</p>
-                      ) : (
-                        transporters.map(transporter => (
-                          <div key={transporter.id} className="border rounded-lg p-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-bold text-gray-800">{transporter.name}</h3>
-                                {transporter.hasBreakOfCharge && (
-                                  <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded">
-                                    Rupture: {transporter.breakOfChargeCost}€
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            {selectedDepts.length === 0 ? (
-                              <p className="text-sm text-gray-500">
-                                Sélectionnez des départements pour visualiser les tarifs estimés.
-                              </p>
-                            ) : (
-                              <ul className="text-sm text-gray-600 space-y-2">
-                                {selectedDepts.map(deptId => {
-                                  const dept = departmentMap.get(deptId);
-                                  if (!dept) return null;
-                                  const rate = transporter.rates.find(r => r.deptId === deptId);
-                                  if (!rate) return null;
-                                  return (
-                                    <li
-                                      key={`${transporter.id}-${deptId}`}
-                                      className="flex flex-wrap items-center gap-2 border-b last:border-b-0 pb-2 last:pb-0"
-                                    >
-                                      <span className="font-semibold">
-                                        {dept.code} - {dept.name}
-                                      </span>
-                                      <span className="text-xs text-gray-500">({dept.km} km)</span>
-                                      <span className="text-gray-700 font-medium sm:ml-auto">
-                                        Baché: {rate.tarpsCost}€ | Plateau: {rate.flatbedCost}€
-                                      </span>
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Itinéraire Optimal */}
-              {optimalRoute.length > 0 && (
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-                  <div className="flex items-center gap-3 mb-4">
-                    <MapPin className="text-blue-600" size={28} />
-                    <h2 className="text-2xl font-bold text-gray-800">Itinéraire Optimisé</h2>
-                  </div>
-                  <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                    <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-semibold whitespace-nowrap">
-                      🏭 Sprimont
-                    </div>
-                    {optimalRoute.map((dept, index) => (
-                      <React.Fragment key={dept.id}>
-                        <div className="text-gray-400">→</div>
-                        <div
-                          className={`px-4 py-2 rounded-lg font-semibold whitespace-nowrap ${index === optimalRoute.length - 1 ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}
-                        >
-                          {index + 1}. {dept.name} ({dept.km}km)
-                        </div>
-                      </React.Fragment>
-                    ))}
-                  </div>
-                  <p className="text-sm text-gray-600 mt-3">💡 Livraisons ordonnées du plus proche au plus éloigné pour minimiser les kilomètres</p>
-                </div>
-              )}
-
-              {/* Résultats (affichés seulement après "Rechercher") */}
-              {hasSearched && (
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-                  <div className="flex items-center gap-3 mb-6">
-                    <Calculator className="text-green-600" size={28} />
-                    <h2 className="text-2xl font-bold text-gray-800">Résultats du Calcul</h2>
-                  </div>
-
-                  {!isBordereauValid || !truckType || selectedDepts.length === 0 ? (
-                    <div className="flex items-center gap-3 text-amber-600 bg-amber-50 p-4 rounded-lg">
-                      <AlertCircle />
-                      <p>Veuillez renseigner tous les critères obligatoires pour effectuer le calcul.</p>
-                    </div>
-                  ) : (
-                    <>
-                      {calculateBestTransporter.length === 0 ? (
-                        <div className="text-gray-600">Aucun transporteur disponible.</div>
-                      ) : (
-                        <div className="space-y-4">
-                          {calculateBestTransporter.map((result, index) => (
-                            <div
-                              key={result.transporter.id}
-                              className={`p-6 rounded-lg border-2 ${index === 0 ? 'bg-green-50 border-green-500' : 'bg-gray-50 border-gray-200'}`}
-                            >
-                              <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-3">
-                                  {index === 0 && (
-                                    <span className="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">⭐ MEILLEUR CHOIX</span>
-                                  )}
-                                  <h3 className="text-xl font-bold text-gray-800">{result.transporter.name}</h3>
-                                  {result.transporter.hasBreakOfCharge && (
-                                    <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded">Rupture de charge</span>
-                                  )}
-                                </div>
-                                <div className="text-right">
-                                  <div className="text-3xl font-bold text-indigo-600">{result.totalCost.toFixed(2)}€</div>
-                                  <div className="text-sm text-gray-500">Coût total</div>
-                                </div>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-sm font-semibold text-gray-700 mb-2">Détail du calcul:</p>
-                                {result.details.map((detail, i) => (
-                                  <p key={i} className="text-sm text-gray-600 ml-4">• {detail}</p>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* Panneau tests */}
-              <div className="bg-white rounded-xl shadow p-4 mb-8">
-                <details>
-                  <summary className="cursor-pointer text-sm text-gray-600">Diagnostics & auto-tests</summary>
-                  <ul className="mt-2 text-sm list-disc ml-6">
-                    {selfTests.map((t, i) => (
-                      <li key={i} className={t.result ? 'text-green-700' : 'text-red-700'}>
-                        {t.name} — {t.result ? 'OK' : 'KO'} (attendu: {String(t.expected)}, obtenu: {String(t.got)})
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              </div>
-
-              {/* Footer */}
-              <div className="text-center text-xs text-gray-500 mb-8">
-                <p>
-                  Format du bordereau : <code className="bg-gray-100 px-1 rounded">23/{currentYear}/####</code> — Le type de camion influe sur les tarifs (Baché vs Plateau).
+          <div className="max-w-7xl mx-auto p-6">
+            {/* ======= HEADER ======= */}
+            <div className="bg-white rounded-xl shadow-lg p-6 mb-8 flex items-center gap-3">
+              <Truck className="text-indigo-600" size={32} />
+              <div>
+                <h1 className="text-3xl font-bold text-gray-800">
+                  Optimiseur de Transporteur
+                </h1>
+                <p className="text-sm text-gray-500">
+                  Données en temps réel depuis Supabase
                 </p>
               </div>
             </div>
+
+            {/* ======= FORMULAIRE CRITÈRES ======= */}
+            <div className="grid md:grid-cols-3 gap-6 mb-8">
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h2 className="text-lg font-semibold mb-4">Critères</h2>
+
+                {/* Bordereau */}
+                <label className="block mb-1 text-sm font-medium text-gray-700">
+                  Bordereau <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder={`23/${currentYear}/####`}
+                  value={bordereau}
+                  onChange={(e) => setBordereau(e.target.value)}
+                  className="w-full border px-3 py-2 rounded mb-3 focus:ring-2 focus:ring-indigo-500"
+                />
+
+                {/* Type de camion */}
+                <label className="block mb-2 text-sm font-medium text-gray-700">
+                  Type de camion <span className="text-red-600">*</span>
+                </label>
+                <div className="flex gap-3 mb-4">
+                  <label className={`px-3 py-2 border rounded cursor-pointer ${truckType === "bache" ? "bg-indigo-50 border-indigo-400" : ""}`}>
+                    <input
+                      type="radio"
+                      name="truck"
+                      value="bache"
+                      checked={truckType === "bache"}
+                      onChange={(e) => setTruckType(e.target.value)}
+                      className="mr-2"
+                    />
+                    Baché
+                  </label>
+                  <label className={`px-3 py-2 border rounded cursor-pointer ${truckType === "plateau" ? "bg-indigo-50 border-indigo-400" : ""}`}>
+                    <input
+                      type="radio"
+                      name="truck"
+                      value="plateau"
+                      checked={truckType === "plateau"}
+                      onChange={(e) => setTruckType(e.target.value)}
+                      className="mr-2"
+                    />
+                    Plateau
+                  </label>
+                </div>
+
+                <button
+                  onClick={() => setHasSearched(true)}
+                  className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 flex items-center justify-center gap-2"
+                  disabled={!BORDEREAU_REGEX.test(bordereau) || !truckType || !selectedDepts.length}
+                >
+                  <Search size={18} /> Rechercher
+                </button>
+              </div>
+
+              {/* ======= LISTE DES DÉPARTEMENTS ======= */}
+              <div className="md:col-span-2 bg-white rounded-xl shadow-lg p-6">
+                <h2 className="text-lg font-semibold mb-4">Départements</h2>
+
+                <div className="max-h-80 overflow-y-auto space-y-2">
+                  {departments.map((dept) => (
+                    <div
+                      key={dept.id}
+                      className="flex items-center justify-between bg-gray-50 p-2 rounded hover:bg-gray-100"
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedDepts.includes(dept.id)}
+                          onChange={(e) =>
+                            setSelectedDepts((prev) =>
+                              e.target.checked
+                                ? [...prev, dept.id]
+                                : prev.filter((id) => id !== dept.id)
+                            )
+                          }
+                          className="text-indigo-600"
+                        />
+                        <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">
+                          {dept.code}
+                        </span>
+                        <span>{dept.name}</span>
+                      </div>
+                      <span className="text-sm text-gray-500">{dept.km} km</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ======= SECTION TRANSPORTEURS ======= */}
+            <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+              <h2 className="text-xl font-bold text-gray-800 mb-4">Transporteurs</h2>
+
+              {selectedDepts.length === 0 ? (
+                <p className="text-gray-500">Sélectionnez un ou plusieurs départements pour afficher les tarifs.</p>
+              ) : (
+                <div className="space-y-4">
+                  {transporters.map((t) => (
+                    <div key={t.id} className="border rounded p-4">
+                      <div className="flex justify-between mb-2">
+                        <h3 className="font-semibold text-lg">{t.name}</h3>
+                        {t.hasBreakOfCharge && (
+                          <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded">
+                            Rupture de charge : {t.breakOfChargeCost}€
+                          </span>
+                        )}
+                      </div>
+                      <ul className="text-sm text-gray-700">
+                        {selectedDepts.map((deptId) => {
+                          const rate = t.rates.find((r) => r.deptId === deptId);
+                          const dept = departments.find((d) => d.id === deptId);
+                          if (!rate || !dept) return null;
+                          return (
+                            <li key={dept.code}>
+                              <strong>{dept.code} - {dept.name}</strong> :
+                              <span className="ml-2">Baché {rate.tarpsCost}€</span> |
+                              <span className="ml-2">Plateau {rate.flatbedCost}€</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ======= RÉSULTATS DU CALCUL ======= */}
+            {hasSearched && bestTransporters.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+                <div className="flex items-center gap-3 mb-6">
+                  <Calculator className="text-green-600" size={28} />
+                  <h2 className="text-2xl font-bold text-gray-800">Résultats du Calcul</h2>
+                </div>
+
+                {bestTransporters.map((result, index) => (
+                  <div
+                    key={result.transporter.id}
+                    className={`p-6 rounded-lg border-2 mb-4 ${
+                      index === 0
+                        ? "bg-green-50 border-green-500"
+                        : "bg-gray-50 border-gray-200"
+                    }`}
+                  >
+                    <div className="flex justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        {index === 0 && (
+                          <span className="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">
+                            ⭐ MEILLEUR CHOIX
+                          </span>
+                        )}
+                        <h3 className="text-xl font-bold text-gray-800">
+                          {result.transporter.name}
+                        </h3>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-3xl font-bold text-indigo-600">
+                          {result.totalCost.toFixed(2)}€
+                        </div>
+                        <div className="text-sm text-gray-500">Coût total</div>
+                      </div>
+                    </div>
+                    <div className="space-y-1 text-sm text-gray-700">
+                      {result.details.map((d, i) => (
+                        <p key={i}>• {d}</p>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         );
       }
 
-      const root = ReactDOM.createRoot(document.getElementById('root'));
+      /********************************************
+       *  RENDU FINAL
+       ********************************************/
+      const root = ReactDOM.createRoot(document.getElementById("root"));
       root.render(<TransportOptimizer />);
     </script>
   </body>
