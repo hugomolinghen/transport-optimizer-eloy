@@ -429,7 +429,6 @@
                       value={loginInput}
                       onChange={(e) => setLoginInput(e.target.value)}
                       className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                      placeholder="ex: admin.eloy"
                       autoFocus
                     />
                     {loginError && <p className="text-sm text-red-600 mt-2">{loginError}</p>}
@@ -575,7 +574,7 @@
                 <div className="mb-4 space-y-2">
                   {!canEditTransporters && (
                     <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                      Les modifications transporteurs sont réservées à l'identifiant <span className="font-semibold">admin.eloy</span>.
+                      Les modifications transporteurs sont réservées à un administrateur.
                     </p>
                   )}
                   <input
@@ -612,7 +611,7 @@
                       onClick={() => canEditTransporters && addTransporter()}
                       className={`px-4 py-2 rounded-lg flex items-center gap-2 ${canEditTransporters ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-200 text-gray-500 cursor-not-allowed'}`}
                       disabled={!canEditTransporters}
-                      title={canEditTransporters ? 'Ajouter un transporteur' : 'Accès réservé à admin.eloy'}
+                      title={canEditTransporters ? 'Ajouter un transporteur' : 'Accès réservé à un administrateur'}
                     >
                       <Plus size={20} /> Ajouter
                     </button>
@@ -635,7 +634,7 @@
                           onClick={() => canEditTransporters && removeTransporter(transporter.id)}
                           className={`p-1 rounded ${canEditTransporters ? 'text-red-600 hover:bg-red-50' : 'text-gray-400 cursor-not-allowed'}`}
                           disabled={!canEditTransporters}
-                          title={canEditTransporters ? 'Supprimer le transporteur' : 'Accès réservé à admin.eloy'}
+                          title={canEditTransporters ? 'Supprimer le transporteur' : 'Accès réservé à un administrateur'}
                         >
                           <Trash2 size={18} />
                         </button>
