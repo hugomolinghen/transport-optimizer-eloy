@@ -192,9 +192,9 @@
             setTransportersLoading(true);
             const { data, error } = await supabaseClient
               .from('v_tarifs_complets')
-              .select('department_code, transporteur_nom, prix_bache, prix_plateau, km_depuis_sprimont')
+              .select('departement_code, transporteur_nom, prix_bache, prix_plateau, km_depuis_sprimont')
               .order('transporteur_nom', { ascending: true })
-              .order('department_code', { ascending: true });
+              .order('departement_code', { ascending: true });
 
             if (!isMounted) return;
 
