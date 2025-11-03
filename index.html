@@ -1,37 +1,46 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="fr">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Optimiseur de Transporteur — Sprimont</title>
-    <meta name="description" content="Optimiseur de transporteurs — fichier autonome" />
-    <!-- Tailwind Play CDN (pour usage rapide / prototype) -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Optimiseur de Transporteur</title>
+
+    <!-- TailwindCSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }</style>
-  </head>
-  <body class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 p-8">
-    <div id="root" class="max-w-7xl mx-auto"></div>
 
-    <!-- React et ReactDOM (dev builds) + Babel pour JSX dans le navigateur (usage prototype) -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- React 18 UMD -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+    <!-- Lucide React (UMD) -->
+    <script src="https://unpkg.com/lucide-react@0.394.0/dist/lucide-react.umd.js"></script>
+
+    <!-- Babel (pour exécuter le JSX directement dans le navigateur) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body class="bg-gradient-to-br from-blue-50 to-indigo-50 min-h-screen">
+    <div id="root"></div>
 
-    <!-- App en JSX (transpilé par Babel) -->
     <script type="text/babel">
-      const { useState, useMemo } = React;
+      // ========= Correctifs de robustesse =========
+      // 1) Lucide UMD peut ne pas exposer "lucideReact" selon la version/CDN.
+      //    On prend la référence globale si dispo, sinon on fournit des composants vides pour éviter les crashs.
+      const LUCIDE_GLOBAL = (typeof window !== 'undefined' && (window.lucideReact || window.LucideReact)) || {};
+      const NullIcon = (props) => null;
+      const {
+        Truck = NullIcon,
+        Plus = NullIcon,
+        Trash2 = NullIcon,
+        Calculator = NullIcon,
+        AlertCircle = NullIcon,
+        MapPin = NullIcon,
+        FileDown = NullIcon,
+        Search = NullIcon,
+      } = LUCIDE_GLOBAL;
 
-      // Icônes simplifiées (emoji) pour garder le fichier autonome
-      const Icon = {
-        Truck: () => (<span role="img" aria-label="truck">🚚</span>),
-        Plus: () => (<span role="img" aria-label="plus">➕</span>),
-        Trash2: () => (<span role="img" aria-label="trash">🗑️</span>),
-        Calculator: () => (<span role="img" aria-label="calc">🧮</span>),
-        AlertCircle: () => (<span role="img" aria-label="alert">⚠️</span>),
-        MapPin: () => (<span role="img" aria-label="pin">📍</span>)
-      };
+      const { useState, useMemo, useEffect } = React;
 
-      // Départements français avec distances réelles depuis Sprimont, Belgique
+      // --- Données de base ---
       const FRENCH_DEPARTMENTS = [
         { id: 1, code: '01', name: 'Ain', km: 620 },
         { id: 2, code: '02', name: 'Aisne', km: 240 },
@@ -131,236 +140,613 @@
         { id: 96, code: '95', name: "Val-d'Oise", km: 330 }
       ];
 
-      // Fonction pour calculer l'itinéraire optimal
+      // Calcul d'itinéraire optimal (plus proche -> plus éloigné, en terminant par le plus loin)
       const calculateOptimalRoute = (selectedDeptIds, departments) => {
         if (selectedDeptIds.length === 0) return [];
         const selectedDepts = selectedDeptIds
           .map(id => departments.find(d => d.id === id))
           .filter(Boolean);
         if (selectedDepts.length === 1) return selectedDepts;
-        // Trouver le département le plus éloigné (destination finale)
-        const farthest = selectedDepts.reduce((max, dept) => dept.km > max.km ? dept : max);
-        // Trier les autres départements par distance croissante
-        const others = selectedDepts
-          .filter(d => d.id !== farthest.id)
-          .sort((a, b) => a.km - b.km);
-        // Construire l'itinéraire : plus proches d'abord, plus éloigné en dernier
+        const farthest = selectedDepts.reduce((max, dept) => (dept.km > max.km ? dept : max));
+        const others = selectedDepts.filter(d => d.id !== farthest.id).sort((a, b) => a.km - b.km);
         return [...others, farthest];
       };
 
+      // Helpers
+      const currentYear = new Date().getFullYear();
+      const BORDEREAU_REGEX = new RegExp(`^23\/${currentYear}\/\d{1,5}$`);
+
+      // Conversion CSV simple (corrigée: pas de saut de ligne dans le RegExp literal)
+      function toCSV(rows) {
+        if (!rows.length) return '';
+        const headers = Object.keys(rows[0]);
+        const escape = (v) => {
+          if (v === null || v === undefined) return '';
+          const s = String(v);
+          if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+          return s;
+        };
+        const lines = [headers.join(',')];
+        for (const row of rows) {
+          lines.push(headers.map(h => escape(row[h])).join(','));
+        }
+        return lines.join('\n');
+      }
+
+      function downloadCSV(filename, rows) {
+        const csv = toCSV(rows);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+
       function TransportOptimizer() {
         const [departments] = useState(FRENCH_DEPARTMENTS);
-        const [transporters, setTransporters] = useState([
-          { id: 1, name: 'Transport Express', rates: FRENCH_DEPARTMENTS.map(d => ({ deptId: d.id, cost: Math.round(d.km * 0.8) })), breakOfChargeCost: 0, hasBreakOfCharge: false }
-        ]);
+
+        // Deux types de camions: baché (tarps) et plateau (flatbed)
+        const [truckType, setTruckType] = useState(''); // 'tarps' | 'flatbed'
+
+        // Bordereau obligatoire
+        const [bordereau, setBordereau] = useState('');
+        const [bordereauTouched, setBordereauTouched] = useState(false);
+
+        // Transporteurs avec deux tarifs par département
+        const [transporters, setTransporters] = useState(() => {
+          const t1 = {
+            id: 1,
+            name: 'Transport Express',
+            hasBreakOfCharge: false,
+            breakOfChargeCost: 0,
+            rates: departments.map(d => ({
+              deptId: d.id,
+              tarpsCost: Math.round(d.km * 0.8), // baché
+              flatbedCost: Math.round(d.km * 0.75) // plateau
+            }))
+          };
+          const t2 = {
+            id: 2,
+            name: 'LogiFast',
+            hasBreakOfCharge: true,
+            breakOfChargeCost: 120,
+            rates: departments.map(d => ({
+              deptId: d.id,
+              tarpsCost: Math.round(d.km * 0.85),
+              flatbedCost: Math.round(d.km * 0.78)
+            }))
+          };
+          return [t1, t2];
+        });
+
         const [selectedDepts, setSelectedDepts] = useState([]);
         const [newTransporter, setNewTransporter] = useState({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
         const [searchTerm, setSearchTerm] = useState('');
+        const [hasSearched, setHasSearched] = useState(false);
 
-        const addTransporter = () => {
-          if (newTransporter.name) {
-            const id = Math.max(...transporters.map(t => t.id), 0) + 1;
-            setTransporters([...transporters, { id, name: newTransporter.name, rates: departments.map(d => ({ deptId: d.id, cost: 0 })), breakOfChargeCost: parseFloat(newTransporter.breakOfChargeCost) || 0, hasBreakOfCharge: newTransporter.hasBreakOfCharge }]);
-            setNewTransporter({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
-          }
-        };
-
-        const removeTransporter = (id) => { setTransporters(transporters.filter(t => t.id !== id)); };
-
-        const updateTransporterRate = (transporterId, deptId, cost) => {
-          setTransporters(transporters.map(t => t.id === transporterId ? { ...t, rates: t.rates.map(r => r.deptId === deptId ? { ...r, cost: parseFloat(cost) || 0 } : r ) } : t ));
-        };
+        // Logs des recherches
+        const [logs, setLogs] = useState([]);
 
         const filteredDepartments = useMemo(() => {
-          return departments.filter(d => d.name.toLowerCase().includes(searchTerm.toLowerCase()) || d.code.includes(searchTerm) );
+          return departments.filter(d =>
+            d.name.toLowerCase().includes(searchTerm.toLowerCase()) || d.code.includes(searchTerm)
+          );
         }, [departments, searchTerm]);
 
-        const optimalRoute = useMemo(() => { return calculateOptimalRoute(selectedDepts, departments); }, [selectedDepts, departments]);
+        const optimalRoute = useMemo(() => calculateOptimalRoute(selectedDepts, departments), [selectedDepts, departments]);
 
         const calculateBestTransporter = useMemo(() => {
-          if (selectedDepts.length === 0) return null;
+          if (selectedDepts.length === 0 || !truckType) return [];
           const route = optimalRoute;
+
           const results = transporters.map(transporter => {
             let totalCost = 0;
             const details = [];
+
             if (transporter.hasBreakOfCharge && route.length > 1) {
-              // Avec rupture de charge
               totalCost += transporter.breakOfChargeCost;
               details.push(`Rupture de charge: ${transporter.breakOfChargeCost}€`);
-              // Transport vers le département le plus éloigné
+
               const farthestDept = route[route.length - 1];
               const farthestRate = transporter.rates.find(r => r.deptId === farthestDept.id);
               if (farthestRate) {
-                totalCost += farthestRate.cost;
-                details.push(`${farthestDept.name} (${farthestDept.km}km): ${farthestRate.cost}€`);
+                const cost = truckType === 'tarps' ? farthestRate.tarpsCost : farthestRate.flatbedCost;
+                totalCost += cost;
+                details.push(`${farthestDept.name} (${farthestDept.km}km): ${cost}€`);
               }
-              // Calcul depuis rupture de charge vers les autres départements
+
               for (let i = 0; i < route.length - 1; i++) {
                 const dept = route[i];
                 const rate = transporter.rates.find(r => r.deptId === dept.id);
                 if (rate) {
-                  const adjustedCost = rate.cost * 0.7;
+                  const base = truckType === 'tarps' ? rate.tarpsCost : rate.flatbedCost;
+                  const adjustedCost = base * 0.7; // réduction après rupture
                   totalCost += adjustedCost;
                   details.push(`${dept.name} (depuis rupture): ${adjustedCost.toFixed(2)}€`);
                 }
               }
             } else {
-              // Transport direct - suit l'itinéraire optimal
               route.forEach((dept, index) => {
                 const rate = transporter.rates.find(r => r.deptId === dept.id);
                 if (rate) {
-                  totalCost += rate.cost;
-                  details.push(`${index + 1}. ${dept.name} (${dept.km}km): ${rate.cost}€`);
+                  const cost = truckType === 'tarps' ? rate.tarpsCost : rate.flatbedCost;
+                  totalCost += cost;
+                  details.push(`${index + 1}. ${dept.name} (${dept.km}km): ${cost}€`);
                 }
               });
             }
+
             return { transporter, totalCost, details };
           });
+
           return results.sort((a, b) => a.totalCost - b.totalCost);
-        }, [transporters, selectedDepts, optimalRoute]);
+        }, [transporters, selectedDepts, optimalRoute, truckType]);
+
+        // Actions Transporteurs
+        const addTransporter = () => {
+          if (!newTransporter.name) return;
+          const id = Math.max(0, ...transporters.map(t => t.id)) + 1;
+          setTransporters([
+            ...transporters,
+            {
+              id,
+              name: newTransporter.name,
+              hasBreakOfCharge: newTransporter.hasBreakOfCharge,
+              breakOfChargeCost: parseFloat(newTransporter.breakOfChargeCost) || 0,
+              rates: departments.map(d => ({ deptId: d.id, tarpsCost: 0, flatbedCost: 0 }))
+            }
+          ]);
+          setNewTransporter({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
+        };
+
+        const removeTransporter = (id) => setTransporters(transporters.filter(t => t.id !== id));
+
+        const updateTransporterRate = (transporterId, deptId, field, value) => {
+          setTransporters(transporters.map(t => (
+            t.id === transporterId
+              ? {
+                  ...t,
+                  rates: t.rates.map(r => (
+                    r.deptId === deptId
+                      ? { ...r, [field]: parseFloat(value) || 0 }
+                      : r
+                  ))
+                }
+              : t
+          )));
+        };
+
+        // Validation bordereau
+        const isBordereauValid = BORDEREAU_REGEX.test(bordereau);
+
+        // Recherche (calcul + log)
+        const onSearch = () => {
+          setBordereauTouched(true);
+          if (!isBordereauValid || !truckType || selectedDepts.length === 0) return;
+          setHasSearched(true);
+
+          const sortedResults = calculateBestTransporter;
+          const top3 = sortedResults.slice(0, 3);
+
+          const logEntry = {
+            date: new Date().toISOString(),
+            bordereau,
+            truckType: truckType === 'tarps' ? 'Baché' : 'Plateau',
+            departments: selectedDepts
+              .map(id => departments.find(d => d.id === id))
+              .filter(Boolean)
+              .map(d => `${d.code}-${d.name}`)
+              .join(' | '),
+            ranked_results: sortedResults
+              .map((r, idx) => `${idx + 1}. ${r.transporter.name} (${r.totalCost.toFixed(2)}€)`) 
+              .join(' | '),
+            choice_1: top3[0] ? `${top3[0].transporter.name} (${top3[0].totalCost.toFixed(2)}€)` : '',
+            choice_2: top3[1] ? `${top3[1].transporter.name} (${top3[1].totalCost.toFixed(2)}€)` : '',
+            choice_3: top3[2] ? `${top3[2].transporter.name} (${top3[2].totalCost.toFixed(2)}€)` : ''
+          };
+
+          setLogs(prev => [logEntry, ...prev]);
+        };
+
+        // ================== Petit panneau de tests (auto-tests) ==================
+        const [selfTests, setSelfTests] = useState([]);
+        useEffect(() => {
+          const tests = [];
+          const YEAR = new Date().getFullYear();
+          const ok = [];
+          const ko = [];
+
+          // Test bordereau (valide)
+          const t1 = `23/${YEAR}/1`;
+          ok.push({ name: 'Bordereau valide court', pass: BORDEREAU_REGEX.test(t1), expected: true, got: BORDEREAU_REGEX.test(t1) });
+
+          const t2 = `23/${YEAR}/12345`;
+          ok.push({ name: 'Bordereau valide 5 chiffres', pass: BORDEREAU_REGEX.test(t2), expected: true, got: BORDEREAU_REGEX.test(t2) });
+
+          // Test bordereau (invalide)
+          const t3 = `23/${YEAR}/123456`; // 6 chiffres => invalide
+          ok.push({ name: 'Bordereau invalide 6 chiffres', pass: !BORDEREAU_REGEX.test(t3), expected: true, got: !BORDEREAU_REGEX.test(t3) });
+
+          // Test itinéraire: doit terminer par le plus éloigné
+          const route = calculateOptimalRoute([8, 76], FRENCH_DEPARTMENTS); // Ardennes (120km) -> Paris (320km)
+          const endsWithFarthest = route.length === 2 && route[1].code === '75';
+          ok.push({ name: 'Itinéraire termine par plus éloigné', pass: endsWithFarthest, expected: true, got: endsWithFarthest });
+
+          // Résumé
+          const allPass = ok.every(t => t.pass);
+          setSelfTests(ok.map(t => ({ name: t.name, result: t.pass, expected: t.expected, got: t.got })));
+          console.log('[SelfTests]', { pass: allPass, details: ok });
+        }, []);
 
         return (
-          <div>
-            <div className="bg-white rounded-xl shadow-lg p-8 mb-8">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="text-indigo-600 text-2xl"><Icon.Truck /></div>
-                <div>
-                  <h1 className="text-3xl font-bold text-gray-800">Optimiseur de Transporteur</h1>
-                  <p className="text-sm text-gray-500">Depuis Eloywater SA, Sprimont, Belgique</p>
+          <div className="min-h-screen p-8">
+            <div className="max-w-7xl mx-auto">
+              {/* Header */}
+              <div className="bg-white rounded-xl shadow-lg p-8 mb-8">
+                <div className="flex items-center gap-3 mb-6">
+                  <Truck className="text-indigo-600" size={32} />
+                  <div>
+                    <h1 className="text-3xl font-bold text-gray-800">Optimiseur de Transporteur</h1>
+                    <p className="text-sm text-gray-500">Depuis Eloywater SA, Sprimont, Belgique</p>
+                  </div>
                 </div>
+                <p className="text-gray-600">Trouvez automatiquement le transporteur le moins cher avec itinéraire optimisé</p>
               </div>
-              <p className="text-gray-600">Trouvez automatiquement le transporteur le moins cher avec itinéraire optimisé</p>
-            </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-              {/* Sélection des Départements */}
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <h2 className="text-xl font-bold text-gray-800 mb-4">Départements à livrer</h2>
-                <input type="text" placeholder="Rechercher (nom ou code)..." className="w-full px-4 py-2 border rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                <div className="mb-4 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg"><strong>Sélectionnés:</strong> {selectedDepts.length} département(s)</div>
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {filteredDepartments.map(dept => (
-                    <div key={dept.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
-                      <div className="flex items-center gap-3 flex-1">
-                        <input type="checkbox" checked={selectedDepts.includes(dept.id)} onChange={(e) => { if (e.target.checked) { setSelectedDepts([...selectedDepts, dept.id]); } else { setSelectedDepts(selectedDepts.filter(id => id !== dept.id)); } }} className="w-4 h-4 text-indigo-600" />
-                        <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">{dept.code}</span>
-                        <span className="font-medium flex-1">{dept.name}</span>
-                        <span className="text-sm text-gray-500 font-mono">{dept.km} km</span>
-                      </div>
+              {/* Zone critères & sélection */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+                {/* Critères globaux */}
+                <div className="bg-white rounded-xl shadow-lg p-6">
+                  <h2 className="text-xl font-bold text-gray-800 mb-4">Critères</h2>
+
+                  {/* Bordereau */}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Bordereau <span className="text-red-600">*</span></label>
+                  <input
+                    type="text"
+                    placeholder={`23/${currentYear}/#####`}
+                    value={bordereau}
+                    onChange={(e) => setBordereau(e.target.value)}
+                    onBlur={() => setBordereauTouched(true)}
+                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 mb-2 ${
+                      bordereauTouched && !isBordereauValid ? 'border-red-400 focus:ring-red-300' : 'focus:ring-indigo-500'
+                    }`}
+                  />
+                  {bordereauTouched && !isBordereauValid && (
+                    <div className="flex items-center gap-2 text-red-600 text-sm mb-4">
+                      <AlertCircle size={16} />
+                      <span>Format attendu : <code className="bg-red-50 px-1 rounded">23/{currentYear}/n</code> (n = 1 à 5 chiffres).</span>
                     </div>
-                  ))}
+                  )}
+
+                  {/* Type de camion */}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Type de camion <span className="text-red-600">*</span></label>
+                  <div className="flex items-center gap-3 mb-4">
+                    <label className={`px-3 py-2 border rounded-lg cursor-pointer ${truckType === 'tarps' ? 'bg-indigo-50 border-indigo-400' : 'bg-white'}`}>
+                      <input type="radio" name="truckType" value="tarps" className="mr-2" onChange={(e) => setTruckType(e.target.value)} checked={truckType==='tarps'} />
+                      Baché
+                    </label>
+                    <label className={`px-3 py-2 border rounded-lg cursor-pointer ${truckType === 'flatbed' ? 'bg-indigo-50 border-indigo-400' : 'bg-white'}`}>
+                      <input type="radio" name="truckType" value="flatbed" className="mr-2" onChange={(e) => setTruckType(e.target.value)} checked={truckType==='flatbed'} />
+                      Plateau
+                    </label>
+                  </div>
+
+                  <button
+                    onClick={onSearch}
+                    className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2"
+                    disabled={!isBordereauValid || !truckType || selectedDepts.length === 0}
+                    title={!isBordereauValid ? 'Bordereau requis' : (!truckType ? 'Type de camion requis' : (selectedDepts.length === 0 ? 'Sélectionnez au moins un département' : 'Lancer la recherche'))}
+                  >
+                    <Search size={18} /> Rechercher
+                  </button>
+
+                  {(!isBordereauValid || !truckType || selectedDepts.length === 0) && (
+                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-3">
+                      Renseignez le bordereau, le type de camion et au moins un département pour activer la recherche.
+                    </p>
+                  )}
+                </div>
+
+                {/* Sélection des Départements */}
+                <div className="bg-white rounded-xl shadow-lg p-6 lg:col-span-2">
+                  <h2 className="text-xl font-bold text-gray-800 mb-4">Départements à livrer</h2>
+
+                  <input
+                    type="text"
+                    placeholder="Rechercher (nom ou code)..."
+                    className="w-full px-4 py-2 border rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+
+                  <div className="mb-4 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
+                    <strong>Sélectionnés:</strong> {selectedDepts.length} département(s)
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-96 overflow-y-auto">
+                    {filteredDepartments.map(dept => (
+                      <div key={dept.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
+                        <div className="flex items-center gap-3 flex-1">
+                          <input
+                            type="checkbox"
+                            checked={selectedDepts.includes(dept.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedDepts([...selectedDepts, dept.id]);
+                              else setSelectedDepts(selectedDepts.filter(id => id !== dept.id));
+                            }}
+                            className="w-4 h-4 text-indigo-600"
+                          />
+                          <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">{dept.code}</span>
+                          <span className="font-medium flex-1">{dept.name}</span>
+                          <span className="text-sm text-gray-500 font-mono">{dept.km} km</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
               {/* Gestion des Transporteurs */}
-              <div className="bg-white rounded-xl shadow-lg p-6">
+              <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
                 <h2 className="text-xl font-bold text-gray-800 mb-4">Transporteurs</h2>
+
                 <div className="mb-4 space-y-2">
-                  <input type="text" placeholder="Nom du transporteur" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" value={newTransporter.name} onChange={(e) => setNewTransporter({...newTransporter, name: e.target.value})} />
-                  <div className="flex gap-2">
-                    <div className="flex items-center gap-2 flex-1">
-                      <input type="checkbox" id="hasBreak" checked={newTransporter.hasBreakOfCharge} onChange={(e) => setNewTransporter({...newTransporter, hasBreakOfCharge: e.target.checked})} className="w-4 h-4 text-indigo-600" />
+                  <input
+                    type="text"
+                    placeholder="Nom du transporteur"
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    value={newTransporter.name}
+                    onChange={(e) => setNewTransporter({ ...newTransporter, name: e.target.value })}
+                  />
+                  <div className="flex gap-2 flex-wrap items-center">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="hasBreak"
+                        checked={newTransporter.hasBreakOfCharge}
+                        onChange={(e) => setNewTransporter({ ...newTransporter, hasBreakOfCharge: e.target.checked })}
+                        className="w-4 h-4 text-indigo-600"
+                      />
                       <label htmlFor="hasBreak" className="text-sm">Rupture de charge</label>
                     </div>
                     {newTransporter.hasBreakOfCharge && (
-                      <input type="number" placeholder="Coût rupture" className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" value={newTransporter.breakOfChargeCost} onChange={(e) => setNewTransporter({...newTransporter, breakOfChargeCost: e.target.value})} />
+                      <input
+                        type="number"
+                        placeholder="Coût rupture"
+                        className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                        value={newTransporter.breakOfChargeCost}
+                        onChange={(e) => setNewTransporter({ ...newTransporter, breakOfChargeCost: e.target.value })}
+                      />
                     )}
-                    <button onClick={addTransporter} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"><Icon.Plus /> Ajouter</button>
+                    <button
+                      onClick={addTransporter}
+                      className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+                    >
+                      <Plus size={20} /> Ajouter
+                    </button>
                   </div>
                 </div>
 
-                <div className="space-y-4 max-h-96 overflow-y-auto">
+                <div className="space-y-4 max-h-[30rem] overflow-y-auto">
                   {transporters.map(transporter => (
                     <div key={transporter.id} className="border rounded-lg p-4">
                       <div className="flex items-center justify-between mb-3">
-                        <div>
+                        <div className="flex items-center gap-2">
                           <h3 className="font-bold text-gray-800">{transporter.name}</h3>
-                          {transporter.hasBreakOfCharge && (<span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded"> Rupture: {transporter.breakOfChargeCost}€ </span>)}
+                          {transporter.hasBreakOfCharge && (
+                            <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded">
+                              Rupture: {transporter.breakOfChargeCost}€
+                            </span>
+                          )}
                         </div>
-                        <button onClick={() => removeTransporter(transporter.id)} className="text-red-600 hover:bg-red-50 p-1 rounded"><Icon.Trash2 /></button>
+                        <button
+                          onClick={() => removeTransporter(transporter.id)}
+                          className="text-red-600 hover:bg-red-50 p-1 rounded"
+                        >
+                          <Trash2 size={18} />
+                        </button>
                       </div>
-
                       <details className="text-sm">
-                        <summary className="cursor-pointer text-indigo-600 hover:text-indigo-800 mb-2">Modifier les tarifs par département</summary>
-                        <div className="space-y-2 mt-2 max-h-48 overflow-y-auto">
-                          {departments.map(dept => { const rate = transporter.rates.find(r => r.deptId === dept.id); return (
-                            <div key={dept.id} className="flex items-center gap-2">
-                              <span className="text-xs w-28 truncate">{dept.code} - {dept.name}</span>
-                              <input type="number" placeholder="Coût" className="flex-1 px-2 py-1 border rounded text-sm" value={rate?.cost || ''} onChange={(e) => updateTransporterRate(transporter.id, dept.id, e.target.value)} />
-                              <span className="text-xs text-gray-500">€</span>
-                            </div>
-                          ); })}
+                        <summary className="cursor-pointer text-indigo-600 hover:text-indigo-800 mb-2">
+                          Modifier les tarifs par département (Baché / Plateau)
+                        </summary>
+                        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3 max-h-64 overflow-y-auto">
+                          {departments.map(dept => {
+                            const rate = transporter.rates.find(r => r.deptId === dept.id) || { tarpsCost: 0, flatbedCost: 0 };
+                            return (
+                              <div key={dept.id} className="border rounded p-2">
+                                <div className="text-xs font-semibold mb-1 truncate">{dept.code} - {dept.name}</div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-xs w-14">Baché</span>
+                                  <input
+                                    type="number"
+                                    placeholder="€"
+                                    className="flex-1 px-2 py-1 border rounded text-sm"
+                                    value={rate.tarpsCost}
+                                    onChange={(e) => updateTransporterRate(transporter.id, dept.id, 'tarpsCost', e.target.value)}
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs w-14">Plateau</span>
+                                  <input
+                                    type="number"
+                                    placeholder="€"
+                                    className="flex-1 px-2 py-1 border rounded text-sm"
+                                    value={rate.flatbedCost}
+                                    onChange={(e) => updateTransporterRate(transporter.id, dept.id, 'flatbedCost', e.target.value)}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </details>
                     </div>
                   ))}
                 </div>
               </div>
-            </div>
 
-            {/* Itinéraire Optimal */}
-            {optimalRoute.length > 0 && (
-              <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="text-blue-600 text-xl"><Icon.MapPin /></div>
-                  <h2 className="text-2xl font-bold text-gray-800">Itinéraire Optimisé</h2>
-                </div>
-                <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                  <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-semibold whitespace-nowrap"> 🏭 Sprimont </div>
-                  {optimalRoute.map((dept, index) => (
-                    <React.Fragment key={dept.id}>
-                      <div className="text-gray-400">→</div>
-                      <div className={`px-4 py-2 rounded-lg font-semibold whitespace-nowrap ${ index === optimalRoute.length - 1 ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
-                        {index + 1}. {dept.name} ({dept.km}km)
-                      </div>
-                    </React.Fragment>
-                  ))}
-                </div>
-                <p className="text-sm text-gray-600 mt-3">💡 Livraisons ordonnées du plus proche au plus éloigné pour minimiser les kilomètres</p>
-              </div>
-            )}
-
-            {/* Résultats */}
-            {calculateBestTransporter && calculateBestTransporter.length > 0 && (
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="text-green-600 text-xl"><Icon.Calculator /></div>
-                  <h2 className="text-2xl font-bold text-gray-800">Résultats du Calcul</h2>
-                </div>
-
-                {selectedDepts.length === 0 ? (
-                  <div className="flex items-center gap-3 text-amber-600 bg-amber-50 p-4 rounded-lg"><Icon.AlertCircle /> <p>Veuillez sélectionner au moins un département pour effectuer le calcul</p></div>
-                ) : (
-                  <div className="space-y-4">
-                    {calculateBestTransporter.map((result, index) => (
-                      <div key={result.transporter.id} className={`p-6 rounded-lg border-2 ${ index === 0 ? 'bg-green-50 border-green-500' : 'bg-gray-50 border-gray-200'}`}>
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-3">
-                            {index === 0 && (<span className="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">⭐ MEILLEUR CHOIX</span>)}
-                            <h3 className="text-xl font-bold text-gray-800">{result.transporter.name}</h3>
-                            {result.transporter.hasBreakOfCharge && (<span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded"> Rupture de charge </span>)}
-                          </div>
-                          <div className="text-right">
-                            <div className="text-3xl font-bold text-indigo-600">{result.totalCost.toFixed(2)}€</div>
-                            <div className="text-sm text-gray-500">Coût total</div>
-                          </div>
+              {/* Itinéraire Optimal */}
+              {optimalRoute.length > 0 && (
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+                  <div className="flex items-center gap-3 mb-4">
+                    <MapPin className="text-blue-600" size={28} />
+                    <h2 className="text-2xl font-bold text-gray-800">Itinéraire Optimisé</h2>
+                  </div>
+                  <div className="flex items-center gap-2 overflow-x-auto pb-2">
+                    <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-semibold whitespace-nowrap">
+                      🏭 Sprimont
+                    </div>
+                    {optimalRoute.map((dept, index) => (
+                      <React.Fragment key={dept.id}>
+                        <div className="text-gray-400">→</div>
+                        <div
+                          className={`px-4 py-2 rounded-lg font-semibold whitespace-nowrap ${index === optimalRoute.length - 1 ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}
+                        >
+                          {index + 1}. {dept.name} ({dept.km}km)
                         </div>
-
-                        <div className="space-y-1">
-                          <p className="text-sm font-semibold text-gray-700 mb-2">Détail du calcul:</p>
-                          {result.details.map((detail, i) => (<p key={i} className="text-sm text-gray-600 ml-4">• {detail}</p>))}
-                        </div>
-                      </div>
+                      </React.Fragment>
                     ))}
+                  </div>
+                  <p className="text-sm text-gray-600 mt-3">💡 Livraisons ordonnées du plus proche au plus éloigné pour minimiser les kilomètres</p>
+                </div>
+              )}
+
+              {/* Résultats (affichés seulement après "Rechercher") */}
+              {hasSearched && (
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+                  <div className="flex items-center gap-3 mb-6">
+                    <Calculator className="text-green-600" size={28} />
+                    <h2 className="text-2xl font-bold text-gray-800">Résultats du Calcul</h2>
+                  </div>
+
+                  {!isBordereauValid || !truckType || selectedDepts.length === 0 ? (
+                    <div className="flex items-center gap-3 text-amber-600 bg-amber-50 p-4 rounded-lg">
+                      <AlertCircle />
+                      <p>Veuillez renseigner tous les critères obligatoires pour effectuer le calcul.</p>
+                    </div>
+                  ) : (
+                    <>
+                      {calculateBestTransporter.length === 0 ? (
+                        <div className="text-gray-600">Aucun transporteur disponible.</div>
+                      ) : (
+                        <div className="space-y-4">
+                          {calculateBestTransporter.map((result, index) => (
+                            <div
+                              key={result.transporter.id}
+                              className={`p-6 rounded-lg border-2 ${index === 0 ? 'bg-green-50 border-green-500' : 'bg-gray-50 border-gray-200'}`}
+                            >
+                              <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-3">
+                                  {index === 0 && (
+                                    <span className="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">⭐ MEILLEUR CHOIX</span>
+                                  )}
+                                  <h3 className="text-xl font-bold text-gray-800">{result.transporter.name}</h3>
+                                  {result.transporter.hasBreakOfCharge && (
+                                    <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded">Rupture de charge</span>
+                                  )}
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-3xl font-bold text-indigo-600">{result.totalCost.toFixed(2)}€</div>
+                                  <div className="text-sm text-gray-500">Coût total</div>
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-sm font-semibold text-gray-700 mb-2">Détail du calcul:</p>
+                                {result.details.map((detail, i) => (
+                                  <p key={i} className="text-sm text-gray-600 ml-4">• {detail}</p>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Logs des recherches */}
+              <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-2xl font-bold text-gray-800">Historique des recherches</h2>
+                  <button
+                    onClick={() => downloadCSV('recherches_transport.csv', logs)}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-50"
+                    disabled={logs.length === 0}
+                    title={logs.length === 0 ? 'Aucune entrée à exporter' : 'Télécharger en CSV'}
+                  >
+                    <FileDown size={18} /> Télécharger CSV
+                  </button>
+                </div>
+
+                {logs.length === 0 ? (
+                  <p className="text-gray-500">Aucune recherche encore. Lancez une recherche pour enregistrer un log.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-gray-600 border-b">
+                          <th className="py-2 pr-4">Date (ISO)</th>
+                          <th className="py-2 pr-4">Bordereau</th>
+                          <th className="py-2 pr-4">Type camion</th>
+                          <th className="py-2 pr-4">Départements</th>
+                          <th className="py-2 pr-4">Résultat classé</th>
+                          <th className="py-2 pr-4">Choix #1</th>
+                          <th className="py-2 pr-4">Choix #2</th>
+                          <th className="py-2 pr-4">Choix #3</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {logs.map((log, idx) => (
+                          <tr key={idx} className="border-b align-top">
+                            <td className="py-2 pr-4 whitespace-nowrap">{log.date}</td>
+                            <td className="py-2 pr-4">{log.bordereau}</td>
+                            <td className="py-2 pr-4">{log.truckType}</td>
+                            <td className="py-2 pr-4">{log.departments}</td>
+                            <td className="py-2 pr-4">{log.ranked_results}</td>
+                            <td className="py-2 pr-4">{log.choice_1}</td>
+                            <td className="py-2 pr-4">{log.choice_2}</td>
+                            <td className="py-2 pr-4">{log.choice_3}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
-            )}
+
+              {/* Panneau tests */}
+              <div className="bg-white rounded-xl shadow p-4 mb-8">
+                <details>
+                  <summary className="cursor-pointer text-sm text-gray-600">Diagnostics & auto-tests</summary>
+                  <ul className="mt-2 text-sm list-disc ml-6">
+                    {selfTests.map((t, i) => (
+                      <li key={i} className={t.result ? 'text-green-700' : 'text-red-700'}>
+                        {t.name} — {t.result ? 'OK' : 'KO'} (attendu: {String(t.expected)}, obtenu: {String(t.got)})
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </div>
+
+              {/* Footer */}
+              <div className="text-center text-xs text-gray-500 mb-8">
+                <p>
+                  Format du bordereau : <code className="bg-gray-100 px-1 rounded">23/{currentYear}/#####</code> — Le type de camion influe sur les tarifs (Baché vs Plateau).
+                </p>
+              </div>
+            </div>
           </div>
         );
       }
 
-      ReactDOM.createRoot(document.getElementById('root')).render(<TransportOptimizer />);
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<TransportOptimizer />);
     </script>
   </body>
 </html>
