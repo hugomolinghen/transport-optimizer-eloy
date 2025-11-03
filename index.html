@@ -71,39 +71,6 @@
       const currentYear = new Date().getFullYear();
       const BORDEREAU_REGEX = new RegExp(`^23\/${currentYear}\/([1-9]\d{0,3})$`);
 
-      // Transporteurs par défaut basés sur la distance Supabase
-        return [
-          {
-            id: 1,
-            name: 'Transport Express',
-            hasBreakOfCharge: false,
-            breakOfChargeCost: 0,
-            rates: departments.map((dept) => {
-              const km = toNumber(dept.km);
-              return {
-                deptId: dept.id,
-                tarpsCost: Math.round(km * 0.8),
-                flatbedCost: Math.round(km * 0.75)
-              };
-            })
-          },
-          {
-            id: 2,
-            name: 'LogiFast',
-            hasBreakOfCharge: true,
-            breakOfChargeCost: 120,
-            rates: departments.map((dept) => {
-              const km = toNumber(dept.km);
-              return {
-                deptId: dept.id,
-                tarpsCost: Math.round(km * 0.85),
-                flatbedCost: Math.round(km * 0.78)
-              };
-            })
-          }
-        ];
-      };
-
       function TransportOptimizer() {
         const [departments, setDepartments] = useState([]);
         const [departmentsLoading, setDepartmentsLoading] = useState(true);
