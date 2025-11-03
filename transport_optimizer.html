@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Optimiseur de Transporteur — Sprimont</title>
+    <meta name="description" content="Optimiseur de transporteurs — fichier autonome" />
+    <!-- Tailwind Play CDN (pour usage rapide / prototype) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }</style>
+  </head>
+  <body class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 p-8">
+    <div id="root" class="max-w-7xl mx-auto"></div>
+
+    <!-- React et ReactDOM (dev builds) + Babel pour JSX dans le navigateur (usage prototype) -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- App en JSX (transpilé par Babel) -->
+    <script type="text/babel">
+      const { useState, useMemo } = React;
+
+      // Icônes simplifiées (emoji) pour garder le fichier autonome
+      const Icon = {
+        Truck: () => (<span role="img" aria-label="truck">🚚</span>),
+        Plus: () => (<span role="img" aria-label="plus">➕</span>),
+        Trash2: () => (<span role="img" aria-label="trash">🗑️</span>),
+        Calculator: () => (<span role="img" aria-label="calc">🧮</span>),
+        AlertCircle: () => (<span role="img" aria-label="alert">⚠️</span>),
+        MapPin: () => (<span role="img" aria-label="pin">📍</span>)
+      };
+
+      // Départements français avec distances réelles depuis Sprimont, Belgique
+      const FRENCH_DEPARTMENTS = [
+        { id: 1, code: '01', name: 'Ain', km: 620 },
+        { id: 2, code: '02', name: 'Aisne', km: 240 },
+        { id: 3, code: '03', name: 'Allier', km: 580 },
+        { id: 4, code: '04', name: 'Alpes-de-Haute-Provence', km: 880 },
+        { id: 5, code: '05', name: 'Hautes-Alpes', km: 850 },
+        { id: 6, code: '06', name: 'Alpes-Maritimes', km: 1000 },
+        { id: 7, code: '07', name: 'Ardèche', km: 680 },
+        { id: 8, code: '08', name: 'Ardennes', km: 120 },
+        { id: 9, code: '09', name: 'Ariège', km: 1100 },
+        { id: 10, code: '10', name: 'Aube', km: 310 },
+        { id: 11, code: '11', name: 'Aude', km: 1050 },
+        { id: 12, code: '12', name: 'Aveyron', km: 900 },
+        { id: 13, code: '13', name: 'Bouches-du-Rhône', km: 850 },
+        { id: 14, code: '14', name: 'Calvados', km: 450 },
+        { id: 15, code: '15', name: 'Cantal', km: 780 },
+        { id: 16, code: '16', name: 'Charente', km: 720 },
+        { id: 17, code: '17', name: 'Charente-Maritime', km: 780 },
+        { id: 18, code: '18', name: 'Cher', km: 550 },
+        { id: 19, code: '19', name: 'Corrèze', km: 740 },
+        { id: 20, code: '2A', name: 'Corse-du-Sud', km: 1200 },
+        { id: 21, code: '2B', name: 'Haute-Corse', km: 1180 },
+        { id: 22, code: '21', name: "Côte-d'Or", km: 450 },
+        { id: 23, code: '22', name: "Côtes-d'Armor", km: 680 },
+        { id: 24, code: '23', name: 'Creuse', km: 700 },
+        { id: 25, code: '24', name: 'Dordogne', km: 820 },
+        { id: 26, code: '25', name: 'Doubs', km: 480 },
+        { id: 27, code: '26', name: 'Drôme', km: 720 },
+        { id: 28, code: '27', name: 'Eure', km: 400 },
+        { id: 29, code: '28', name: 'Eure-et-Loir', km: 450 },
+        { id: 30, code: '29', name: 'Finistère', km: 850 },
+        { id: 31, code: '30', name: 'Gard', km: 850 },
+        { id: 32, code: '31', name: 'Haute-Garonne', km: 1050 },
+        { id: 33, code: '32', name: 'Gers', km: 1000 },
+        { id: 34, code: '33', name: 'Gironde', km: 900 },
+        { id: 35, code: '34', name: 'Hérault', km: 950 },
+        { id: 36, code: '35', name: 'Ille-et-Vilaine', km: 620 },
+        { id: 37, code: '36', name: 'Indre', km: 600 },
+        { id: 38, code: '37', name: 'Indre-et-Loire', km: 550 },
+        { id: 39, code: '38', name: 'Isère', km: 680 },
+        { id: 40, code: '39', name: 'Jura', km: 520 },
+        { id: 41, code: '40', name: 'Landes', km: 950 },
+        { id: 42, code: '41', name: 'Loir-et-Cher', km: 500 },
+        { id: 43, code: '42', name: 'Loire', km: 650 },
+        { id: 44, code: '43', name: 'Haute-Loire', km: 720 },
+        { id: 45, code: '44', name: 'Loire-Atlantique', km: 680 },
+        { id: 46, code: '45', name: 'Loiret', km: 480 },
+        { id: 47, code: '46', name: 'Lot', km: 880 },
+        { id: 48, code: '47', name: 'Lot-et-Garonne', km: 900 },
+        { id: 49, code: '48', name: 'Lozère', km: 850 },
+        { id: 50, code: '49', name: 'Maine-et-Loire', km: 600 },
+        { id: 51, code: '50', name: 'Manche', km: 550 },
+        { id: 52, code: '51', name: 'Marne', km: 200 },
+        { id: 53, code: '52', name: 'Haute-Marne', km: 350 },
+        { id: 54, code: '53', name: 'Mayenne', km: 580 },
+        { id: 55, code: '54', name: 'Meurthe-et-Moselle', km: 180 },
+        { id: 56, code: '55', name: 'Meuse', km: 150 },
+        { id: 57, code: '56', name: 'Morbihan', km: 750 },
+        { id: 58, code: '57', name: 'Moselle', km: 200 },
+        { id: 59, code: '58', name: 'Nièvre', km: 520 },
+        { id: 60, code: '59', name: 'Nord', km: 180 },
+        { id: 61, code: '60', name: 'Oise', km: 300 },
+        { id: 62, code: '61', name: 'Orne', km: 500 },
+        { id: 63, code: '62', name: 'Pas-de-Calais', km: 250 },
+        { id: 64, code: '63', name: 'Puy-de-Dôme', km: 680 },
+        { id: 65, code: '64', name: 'Pyrénées-Atlantiques', km: 1100 },
+        { id: 66, code: '65', name: 'Hautes-Pyrénées', km: 1080 },
+        { id: 67, code: '66', name: 'Pyrénées-Orientales', km: 1150 },
+        { id: 68, code: '67', name: 'Bas-Rhin', km: 350 },
+        { id: 69, code: '68', name: 'Haut-Rhin', km: 420 },
+        { id: 70, code: '69', name: 'Rhône', km: 620 },
+        { id: 71, code: '70', name: 'Haute-Saône', km: 430 },
+        { id: 72, code: '71', name: 'Saône-et-Loire', km: 520 },
+        { id: 73, code: '72', name: 'Sarthe', km: 550 },
+        { id: 74, code: '73', name: 'Savoie', km: 700 },
+        { id: 75, code: '74', name: 'Haute-Savoie', km: 650 },
+        { id: 76, code: '75', name: 'Paris', km: 320 },
+        { id: 77, code: '76', name: 'Seine-Maritime', km: 400 },
+        { id: 78, code: '77', name: 'Seine-et-Marne', km: 350 },
+        { id: 79, code: '78', name: 'Yvelines', km: 350 },
+        { id: 80, code: '79', name: 'Deux-Sèvres', km: 650 },
+        { id: 81, code: '80', name: 'Somme', km: 280 },
+        { id: 82, code: '81', name: 'Tarn', km: 1000 },
+        { id: 83, code: '82', name: 'Tarn-et-Garonne', km: 950 },
+        { id: 84, code: '83', name: 'Var', km: 950 },
+        { id: 85, code: '84', name: 'Vaucluse', km: 800 },
+        { id: 86, code: '85', name: 'Vendée', km: 700 },
+        { id: 87, code: '86', name: 'Vienne', km: 630 },
+        { id: 88, code: '87', name: 'Haute-Vienne', km: 700 },
+        { id: 89, code: '88', name: 'Vosges', km: 300 },
+        { id: 90, code: '89', name: 'Yonne', km: 420 },
+        { id: 91, code: '90', name: 'Territoire de Belfort', km: 450 },
+        { id: 92, code: '91', name: 'Essonne', km: 340 },
+        { id: 93, code: '92', name: 'Hauts-de-Seine', km: 320 },
+        { id: 94, code: '93', name: 'Seine-Saint-Denis', km: 330 },
+        { id: 95, code: '94', name: 'Val-de-Marne', km: 340 },
+        { id: 96, code: '95', name: "Val-d'Oise", km: 330 }
+      ];
+
+      // Fonction pour calculer l'itinéraire optimal
+      const calculateOptimalRoute = (selectedDeptIds, departments) => {
+        if (selectedDeptIds.length === 0) return [];
+        const selectedDepts = selectedDeptIds
+          .map(id => departments.find(d => d.id === id))
+          .filter(Boolean);
+        if (selectedDepts.length === 1) return selectedDepts;
+        // Trouver le département le plus éloigné (destination finale)
+        const farthest = selectedDepts.reduce((max, dept) => dept.km > max.km ? dept : max);
+        // Trier les autres départements par distance croissante
+        const others = selectedDepts
+          .filter(d => d.id !== farthest.id)
+          .sort((a, b) => a.km - b.km);
+        // Construire l'itinéraire : plus proches d'abord, plus éloigné en dernier
+        return [...others, farthest];
+      };
+
+      function TransportOptimizer() {
+        const [departments] = useState(FRENCH_DEPARTMENTS);
+        const [transporters, setTransporters] = useState([
+          { id: 1, name: 'Transport Express', rates: FRENCH_DEPARTMENTS.map(d => ({ deptId: d.id, cost: Math.round(d.km * 0.8) })), breakOfChargeCost: 0, hasBreakOfCharge: false }
+        ]);
+        const [selectedDepts, setSelectedDepts] = useState([]);
+        const [newTransporter, setNewTransporter] = useState({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
+        const [searchTerm, setSearchTerm] = useState('');
+
+        const addTransporter = () => {
+          if (newTransporter.name) {
+            const id = Math.max(...transporters.map(t => t.id), 0) + 1;
+            setTransporters([...transporters, { id, name: newTransporter.name, rates: departments.map(d => ({ deptId: d.id, cost: 0 })), breakOfChargeCost: parseFloat(newTransporter.breakOfChargeCost) || 0, hasBreakOfCharge: newTransporter.hasBreakOfCharge }]);
+            setNewTransporter({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
+          }
+        };
+
+        const removeTransporter = (id) => { setTransporters(transporters.filter(t => t.id !== id)); };
+
+        const updateTransporterRate = (transporterId, deptId, cost) => {
+          setTransporters(transporters.map(t => t.id === transporterId ? { ...t, rates: t.rates.map(r => r.deptId === deptId ? { ...r, cost: parseFloat(cost) || 0 } : r ) } : t ));
+        };
+
+        const filteredDepartments = useMemo(() => {
+          return departments.filter(d => d.name.toLowerCase().includes(searchTerm.toLowerCase()) || d.code.includes(searchTerm) );
+        }, [departments, searchTerm]);
+
+        const optimalRoute = useMemo(() => { return calculateOptimalRoute(selectedDepts, departments); }, [selectedDepts, departments]);
+
+        const calculateBestTransporter = useMemo(() => {
+          if (selectedDepts.length === 0) return null;
+          const route = optimalRoute;
+          const results = transporters.map(transporter => {
+            let totalCost = 0;
+            const details = [];
+            if (transporter.hasBreakOfCharge && route.length > 1) {
+              // Avec rupture de charge
+              totalCost += transporter.breakOfChargeCost;
+              details.push(`Rupture de charge: ${transporter.breakOfChargeCost}€`);
+              // Transport vers le département le plus éloigné
+              const farthestDept = route[route.length - 1];
+              const farthestRate = transporter.rates.find(r => r.deptId === farthestDept.id);
+              if (farthestRate) {
+                totalCost += farthestRate.cost;
+                details.push(`${farthestDept.name} (${farthestDept.km}km): ${farthestRate.cost}€`);
+              }
+              // Calcul depuis rupture de charge vers les autres départements
+              for (let i = 0; i < route.length - 1; i++) {
+                const dept = route[i];
+                const rate = transporter.rates.find(r => r.deptId === dept.id);
+                if (rate) {
+                  const adjustedCost = rate.cost * 0.7;
+                  totalCost += adjustedCost;
+                  details.push(`${dept.name} (depuis rupture): ${adjustedCost.toFixed(2)}€`);
+                }
+              }
+            } else {
+              // Transport direct - suit l'itinéraire optimal
+              route.forEach((dept, index) => {
+                const rate = transporter.rates.find(r => r.deptId === dept.id);
+                if (rate) {
+                  totalCost += rate.cost;
+                  details.push(`${index + 1}. ${dept.name} (${dept.km}km): ${rate.cost}€`);
+                }
+              });
+            }
+            return { transporter, totalCost, details };
+          });
+          return results.sort((a, b) => a.totalCost - b.totalCost);
+        }, [transporters, selectedDepts, optimalRoute]);
+
+        return (
+          <div>
+            <div className="bg-white rounded-xl shadow-lg p-8 mb-8">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="text-indigo-600 text-2xl"><Icon.Truck /></div>
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-800">Optimiseur de Transporteur</h1>
+                  <p className="text-sm text-gray-500">Depuis Eloywater SA, Sprimont, Belgique</p>
+                </div>
+              </div>
+              <p className="text-gray-600">Trouvez automatiquement le transporteur le moins cher avec itinéraire optimisé</p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+              {/* Sélection des Départements */}
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h2 className="text-xl font-bold text-gray-800 mb-4">Départements à livrer</h2>
+                <input type="text" placeholder="Rechercher (nom ou code)..." className="w-full px-4 py-2 border rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                <div className="mb-4 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg"><strong>Sélectionnés:</strong> {selectedDepts.length} département(s)</div>
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {filteredDepartments.map(dept => (
+                    <div key={dept.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
+                      <div className="flex items-center gap-3 flex-1">
+                        <input type="checkbox" checked={selectedDepts.includes(dept.id)} onChange={(e) => { if (e.target.checked) { setSelectedDepts([...selectedDepts, dept.id]); } else { setSelectedDepts(selectedDepts.filter(id => id !== dept.id)); } }} className="w-4 h-4 text-indigo-600" />
+                        <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">{dept.code}</span>
+                        <span className="font-medium flex-1">{dept.name}</span>
+                        <span className="text-sm text-gray-500 font-mono">{dept.km} km</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Gestion des Transporteurs */}
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h2 className="text-xl font-bold text-gray-800 mb-4">Transporteurs</h2>
+                <div className="mb-4 space-y-2">
+                  <input type="text" placeholder="Nom du transporteur" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" value={newTransporter.name} onChange={(e) => setNewTransporter({...newTransporter, name: e.target.value})} />
+                  <div className="flex gap-2">
+                    <div className="flex items-center gap-2 flex-1">
+                      <input type="checkbox" id="hasBreak" checked={newTransporter.hasBreakOfCharge} onChange={(e) => setNewTransporter({...newTransporter, hasBreakOfCharge: e.target.checked})} className="w-4 h-4 text-indigo-600" />
+                      <label htmlFor="hasBreak" className="text-sm">Rupture de charge</label>
+                    </div>
+                    {newTransporter.hasBreakOfCharge && (
+                      <input type="number" placeholder="Coût rupture" className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" value={newTransporter.breakOfChargeCost} onChange={(e) => setNewTransporter({...newTransporter, breakOfChargeCost: e.target.value})} />
+                    )}
+                    <button onClick={addTransporter} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"><Icon.Plus /> Ajouter</button>
+                  </div>
+                </div>
+
+                <div className="space-y-4 max-h-96 overflow-y-auto">
+                  {transporters.map(transporter => (
+                    <div key={transporter.id} className="border rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <h3 className="font-bold text-gray-800">{transporter.name}</h3>
+                          {transporter.hasBreakOfCharge && (<span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded"> Rupture: {transporter.breakOfChargeCost}€ </span>)}
+                        </div>
+                        <button onClick={() => removeTransporter(transporter.id)} className="text-red-600 hover:bg-red-50 p-1 rounded"><Icon.Trash2 /></button>
+                      </div>
+
+                      <details className="text-sm">
+                        <summary className="cursor-pointer text-indigo-600 hover:text-indigo-800 mb-2">Modifier les tarifs par département</summary>
+                        <div className="space-y-2 mt-2 max-h-48 overflow-y-auto">
+                          {departments.map(dept => { const rate = transporter.rates.find(r => r.deptId === dept.id); return (
+                            <div key={dept.id} className="flex items-center gap-2">
+                              <span className="text-xs w-28 truncate">{dept.code} - {dept.name}</span>
+                              <input type="number" placeholder="Coût" className="flex-1 px-2 py-1 border rounded text-sm" value={rate?.cost || ''} onChange={(e) => updateTransporterRate(transporter.id, dept.id, e.target.value)} />
+                              <span className="text-xs text-gray-500">€</span>
+                            </div>
+                          ); })}
+                        </div>
+                      </details>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Itinéraire Optimal */}
+            {optimalRoute.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="text-blue-600 text-xl"><Icon.MapPin /></div>
+                  <h2 className="text-2xl font-bold text-gray-800">Itinéraire Optimisé</h2>
+                </div>
+                <div className="flex items-center gap-2 overflow-x-auto pb-2">
+                  <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-semibold whitespace-nowrap"> 🏭 Sprimont </div>
+                  {optimalRoute.map((dept, index) => (
+                    <React.Fragment key={dept.id}>
+                      <div className="text-gray-400">→</div>
+                      <div className={`px-4 py-2 rounded-lg font-semibold whitespace-nowrap ${ index === optimalRoute.length - 1 ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
+                        {index + 1}. {dept.name} ({dept.km}km)
+                      </div>
+                    </React.Fragment>
+                  ))}
+                </div>
+                <p className="text-sm text-gray-600 mt-3">💡 Livraisons ordonnées du plus proche au plus éloigné pour minimiser les kilomètres</p>
+              </div>
+            )}
+
+            {/* Résultats */}
+            {calculateBestTransporter && calculateBestTransporter.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="text-green-600 text-xl"><Icon.Calculator /></div>
+                  <h2 className="text-2xl font-bold text-gray-800">Résultats du Calcul</h2>
+                </div>
+
+                {selectedDepts.length === 0 ? (
+                  <div className="flex items-center gap-3 text-amber-600 bg-amber-50 p-4 rounded-lg"><Icon.AlertCircle /> <p>Veuillez sélectionner au moins un département pour effectuer le calcul</p></div>
+                ) : (
+                  <div className="space-y-4">
+                    {calculateBestTransporter.map((result, index) => (
+                      <div key={result.transporter.id} className={`p-6 rounded-lg border-2 ${ index === 0 ? 'bg-green-50 border-green-500' : 'bg-gray-50 border-gray-200'}`}>
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-3">
+                            {index === 0 && (<span className="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">⭐ MEILLEUR CHOIX</span>)}
+                            <h3 className="text-xl font-bold text-gray-800">{result.transporter.name}</h3>
+                            {result.transporter.hasBreakOfCharge && (<span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded"> Rupture de charge </span>)}
+                          </div>
+                          <div className="text-right">
+                            <div className="text-3xl font-bold text-indigo-600">{result.totalCost.toFixed(2)}€</div>
+                            <div className="text-sm text-gray-500">Coût total</div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold text-gray-700 mb-2">Détail du calcul:</p>
+                          {result.details.map((detail, i) => (<p key={i} className="text-sm text-gray-600 ml-4">• {detail}</p>))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(<TransportOptimizer />);
+    </script>
+  </body>
+</html>
