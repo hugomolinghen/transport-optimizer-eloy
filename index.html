@@ -154,7 +154,7 @@
 
       // Helpers
       const currentYear = new Date().getFullYear();
-      const BORDEREAU_REGEX = new RegExp(`^23\/${currentYear}\/\d{1,5}$`);
+      const BORDEREAU_REGEX = new RegExp(`^23\/${currentYear}\/([1-9]\d{0,3})$`);
 
       // Conversion CSV simple (corrigée: pas de saut de ligne dans le RegExp literal)
       function toCSV(rows) {
@@ -230,6 +230,34 @@
 
         // Logs des recherches
         const [logs, setLogs] = useState([]);
+        const [user, setUser] = useState(null);
+        const [loginInput, setLoginInput] = useState('');
+        const [loginError, setLoginError] = useState('');
+
+        const normalizedUser = user ? user.toLowerCase() : '';
+        const isAdmin = normalizedUser === 'admin.eloy';
+        const canEditTransporters = isAdmin;
+        const canViewLogs = isAdmin;
+
+        const handleLogin = (event) => {
+          event.preventDefault();
+          const value = loginInput.trim();
+          if (!value) {
+            setLoginError('Veuillez saisir un identifiant.');
+            return;
+          }
+          setUser(value);
+          setLoginInput('');
+          setLoginError('');
+          setNewTransporter({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
+        };
+
+        const handleLogout = () => {
+          setUser(null);
+          setLoginInput('');
+          setLoginError('');
+          setNewTransporter({ name: '', breakOfChargeCost: '', hasBreakOfCharge: false });
+        };
 
         const filteredDepartments = useMemo(() => {
           return departments.filter(d =>
@@ -364,12 +392,12 @@
           const t1 = `23/${YEAR}/1`;
           ok.push({ name: 'Bordereau valide court', pass: BORDEREAU_REGEX.test(t1), expected: true, got: BORDEREAU_REGEX.test(t1) });
 
-          const t2 = `23/${YEAR}/12345`;
-          ok.push({ name: 'Bordereau valide 5 chiffres', pass: BORDEREAU_REGEX.test(t2), expected: true, got: BORDEREAU_REGEX.test(t2) });
+          const t2 = `23/${YEAR}/1234`;
+          ok.push({ name: 'Bordereau valide 4 chiffres', pass: BORDEREAU_REGEX.test(t2), expected: true, got: BORDEREAU_REGEX.test(t2) });
 
           // Test bordereau (invalide)
-          const t3 = `23/${YEAR}/123456`; // 6 chiffres => invalide
-          ok.push({ name: 'Bordereau invalide 6 chiffres', pass: !BORDEREAU_REGEX.test(t3), expected: true, got: !BORDEREAU_REGEX.test(t3) });
+          const t3 = `23/${YEAR}/12345`; // 5 chiffres => invalide
+          ok.push({ name: 'Bordereau invalide 5 chiffres', pass: !BORDEREAU_REGEX.test(t3), expected: true, got: !BORDEREAU_REGEX.test(t3) });
 
           // Test itinéraire: doit terminer par le plus éloigné
           const route = calculateOptimalRoute([8, 76], FRENCH_DEPARTMENTS); // Ardennes (120km) -> Paris (320km)
@@ -382,19 +410,69 @@
           console.log('[SelfTests]', { pass: allPass, details: ok });
         }, []);
 
+        if (!user) {
+          return (
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 p-4">
+              <div className="bg-white shadow-xl rounded-2xl p-8 w-full max-w-md">
+                <div className="flex items-center gap-3 mb-6">
+                  <Truck className="text-indigo-600" size={32} />
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-800">Connexion requise</h1>
+                    <p className="text-sm text-gray-500">Veuillez saisir votre identifiant pour accéder à l'outil.</p>
+                  </div>
+                </div>
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Identifiant</label>
+                    <input
+                      type="text"
+                      value={loginInput}
+                      onChange={(e) => setLoginInput(e.target.value)}
+                      className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      placeholder="ex: admin.eloy"
+                      autoFocus
+                    />
+                    {loginError && <p className="text-sm text-red-600 mt-2">{loginError}</p>}
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700"
+                  >
+                    Continuer
+                  </button>
+                </form>
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div className="min-h-screen p-8">
             <div className="max-w-7xl mx-auto">
               {/* Header */}
               <div className="bg-white rounded-xl shadow-lg p-8 mb-8">
-                <div className="flex items-center gap-3 mb-6">
-                  <Truck className="text-indigo-600" size={32} />
-                  <div>
-                    <h1 className="text-3xl font-bold text-gray-800">Optimiseur de Transporteur</h1>
-                    <p className="text-sm text-gray-500">Depuis Eloywater SA, Sprimont, Belgique</p>
+                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
+                  <div className="flex items-center gap-3">
+                    <Truck className="text-indigo-600" size={32} />
+                    <div>
+                      <h1 className="text-3xl font-bold text-gray-800">Optimiseur de Transporteur</h1>
+                      <p className="text-sm text-gray-500">Depuis Eloywater SA, Sprimont, Belgique</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 self-end md:self-auto">
+                    <div className="text-sm text-gray-500">
+                      Connecté en tant que <span className="font-semibold text-gray-700">{user}</span>
+                      {!isAdmin && <span className="block text-xs text-amber-600">Mode lecture seule</span>}
+                    </div>
+                    <button
+                      onClick={handleLogout}
+                      className="px-4 py-2 border rounded-lg text-sm font-semibold hover:bg-gray-50"
+                    >
+                      Déconnexion
+                    </button>
                   </div>
                 </div>
-                <p className="text-gray-600">Trouvez automatiquement le transporteur le moins cher avec itinéraire optimisé</p>
+                <p className="text-gray-600 mt-6">Trouvez automatiquement le transporteur le moins cher avec itinéraire optimisé</p>
               </div>
 
               {/* Zone critères & sélection */}
@@ -407,7 +485,7 @@
                   <label className="block text-sm font-medium text-gray-700 mb-1">Bordereau <span className="text-red-600">*</span></label>
                   <input
                     type="text"
-                    placeholder={`23/${currentYear}/#####`}
+                    placeholder={`23/${currentYear}/####`}
                     value={bordereau}
                     onChange={(e) => setBordereau(e.target.value)}
                     onBlur={() => setBordereauTouched(true)}
@@ -418,7 +496,7 @@
                   {bordereauTouched && !isBordereauValid && (
                     <div className="flex items-center gap-2 text-red-600 text-sm mb-4">
                       <AlertCircle size={16} />
-                      <span>Format attendu : <code className="bg-red-50 px-1 rounded">23/{currentYear}/n</code> (n = 1 à 5 chiffres).</span>
+                      <span>Format attendu : <code className="bg-red-50 px-1 rounded">23/{currentYear}/n</code> (n = 1 à 4 chiffres).</span>
                     </div>
                   )}
 
@@ -495,12 +573,18 @@
                 <h2 className="text-xl font-bold text-gray-800 mb-4">Transporteurs</h2>
 
                 <div className="mb-4 space-y-2">
+                  {!canEditTransporters && (
+                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                      Les modifications transporteurs sont réservées à l'identifiant <span className="font-semibold">admin.eloy</span>.
+                    </p>
+                  )}
                   <input
                     type="text"
                     placeholder="Nom du transporteur"
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${!canEditTransporters ? 'bg-gray-100 cursor-not-allowed opacity-75' : ''}`}
                     value={newTransporter.name}
                     onChange={(e) => setNewTransporter({ ...newTransporter, name: e.target.value })}
+                    disabled={!canEditTransporters}
                   />
                   <div className="flex gap-2 flex-wrap items-center">
                     <div className="flex items-center gap-2">
@@ -510,6 +594,7 @@
                         checked={newTransporter.hasBreakOfCharge}
                         onChange={(e) => setNewTransporter({ ...newTransporter, hasBreakOfCharge: e.target.checked })}
                         className="w-4 h-4 text-indigo-600"
+                        disabled={!canEditTransporters}
                       />
                       <label htmlFor="hasBreak" className="text-sm">Rupture de charge</label>
                     </div>
@@ -517,14 +602,17 @@
                       <input
                         type="number"
                         placeholder="Coût rupture"
-                        className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                        className={`px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${!canEditTransporters ? 'bg-gray-100 cursor-not-allowed opacity-75' : ''}`}
                         value={newTransporter.breakOfChargeCost}
                         onChange={(e) => setNewTransporter({ ...newTransporter, breakOfChargeCost: e.target.value })}
+                        disabled={!canEditTransporters}
                       />
                     )}
                     <button
-                      onClick={addTransporter}
-                      className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+                      onClick={() => canEditTransporters && addTransporter()}
+                      className={`px-4 py-2 rounded-lg flex items-center gap-2 ${canEditTransporters ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-200 text-gray-500 cursor-not-allowed'}`}
+                      disabled={!canEditTransporters}
+                      title={canEditTransporters ? 'Ajouter un transporteur' : 'Accès réservé à admin.eloy'}
                     >
                       <Plus size={20} /> Ajouter
                     </button>
@@ -544,8 +632,10 @@
                           )}
                         </div>
                         <button
-                          onClick={() => removeTransporter(transporter.id)}
-                          className="text-red-600 hover:bg-red-50 p-1 rounded"
+                          onClick={() => canEditTransporters && removeTransporter(transporter.id)}
+                          className={`p-1 rounded ${canEditTransporters ? 'text-red-600 hover:bg-red-50' : 'text-gray-400 cursor-not-allowed'}`}
+                          disabled={!canEditTransporters}
+                          title={canEditTransporters ? 'Supprimer le transporteur' : 'Accès réservé à admin.eloy'}
                         >
                           <Trash2 size={18} />
                         </button>
@@ -554,6 +644,9 @@
                         <summary className="cursor-pointer text-indigo-600 hover:text-indigo-800 mb-2">
                           Modifier les tarifs par département (Baché / Plateau)
                         </summary>
+                        {!canEditTransporters && (
+                          <p className="text-xs text-amber-600 mb-2">Consultation uniquement.</p>
+                        )}
                         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3 max-h-64 overflow-y-auto">
                           {departments.map(dept => {
                             const rate = transporter.rates.find(r => r.deptId === dept.id) || { tarpsCost: 0, flatbedCost: 0 };
@@ -565,9 +658,10 @@
                                   <input
                                     type="number"
                                     placeholder="€"
-                                    className="flex-1 px-2 py-1 border rounded text-sm"
+                                    className={`flex-1 px-2 py-1 border rounded text-sm ${!canEditTransporters ? 'bg-gray-100 cursor-not-allowed opacity-75' : ''}`}
                                     value={rate.tarpsCost}
                                     onChange={(e) => updateTransporterRate(transporter.id, dept.id, 'tarpsCost', e.target.value)}
+                                    disabled={!canEditTransporters}
                                   />
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -575,9 +669,10 @@
                                   <input
                                     type="number"
                                     placeholder="€"
-                                    className="flex-1 px-2 py-1 border rounded text-sm"
+                                    className={`flex-1 px-2 py-1 border rounded text-sm ${!canEditTransporters ? 'bg-gray-100 cursor-not-allowed opacity-75' : ''}`}
                                     value={rate.flatbedCost}
                                     onChange={(e) => updateTransporterRate(transporter.id, dept.id, 'flatbedCost', e.target.value)}
+                                    disabled={!canEditTransporters}
                                   />
                                 </div>
                               </div>
@@ -670,55 +765,56 @@
                 </div>
               )}
 
-              {/* Logs des recherches */}
-              <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-2xl font-bold text-gray-800">Historique des recherches</h2>
-                  <button
-                    onClick={() => downloadCSV('recherches_transport.csv', logs)}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-50"
-                    disabled={logs.length === 0}
-                    title={logs.length === 0 ? 'Aucune entrée à exporter' : 'Télécharger en CSV'}
-                  >
-                    <FileDown size={18} /> Télécharger CSV
-                  </button>
-                </div>
-
-                {logs.length === 0 ? (
-                  <p className="text-gray-500">Aucune recherche encore. Lancez une recherche pour enregistrer un log.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-gray-600 border-b">
-                          <th className="py-2 pr-4">Date (ISO)</th>
-                          <th className="py-2 pr-4">Bordereau</th>
-                          <th className="py-2 pr-4">Type camion</th>
-                          <th className="py-2 pr-4">Départements</th>
-                          <th className="py-2 pr-4">Résultat classé</th>
-                          <th className="py-2 pr-4">Choix #1</th>
-                          <th className="py-2 pr-4">Choix #2</th>
-                          <th className="py-2 pr-4">Choix #3</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {logs.map((log, idx) => (
-                          <tr key={idx} className="border-b align-top">
-                            <td className="py-2 pr-4 whitespace-nowrap">{log.date}</td>
-                            <td className="py-2 pr-4">{log.bordereau}</td>
-                            <td className="py-2 pr-4">{log.truckType}</td>
-                            <td className="py-2 pr-4">{log.departments}</td>
-                            <td className="py-2 pr-4">{log.ranked_results}</td>
-                            <td className="py-2 pr-4">{log.choice_1}</td>
-                            <td className="py-2 pr-4">{log.choice_2}</td>
-                            <td className="py-2 pr-4">{log.choice_3}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+              {canViewLogs && (
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-2xl font-bold text-gray-800">Historique des recherches</h2>
+                    <button
+                      onClick={() => downloadCSV('recherches_transport.csv', logs)}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-50"
+                      disabled={logs.length === 0}
+                      title={logs.length === 0 ? 'Aucune entrée à exporter' : 'Télécharger en CSV'}
+                    >
+                      <FileDown size={18} /> Télécharger CSV
+                    </button>
                   </div>
-                )}
-              </div>
+
+                  {logs.length === 0 ? (
+                    <p className="text-gray-500">Aucune recherche encore. Lancez une recherche pour enregistrer un log.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-gray-600 border-b">
+                            <th className="py-2 pr-4">Date (ISO)</th>
+                            <th className="py-2 pr-4">Bordereau</th>
+                            <th className="py-2 pr-4">Type camion</th>
+                            <th className="py-2 pr-4">Départements</th>
+                            <th className="py-2 pr-4">Résultat classé</th>
+                            <th className="py-2 pr-4">Choix #1</th>
+                            <th className="py-2 pr-4">Choix #2</th>
+                            <th className="py-2 pr-4">Choix #3</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {logs.map((log, idx) => (
+                            <tr key={idx} className="border-b align-top">
+                              <td className="py-2 pr-4 whitespace-nowrap">{log.date}</td>
+                              <td className="py-2 pr-4">{log.bordereau}</td>
+                              <td className="py-2 pr-4">{log.truckType}</td>
+                              <td className="py-2 pr-4">{log.departments}</td>
+                              <td className="py-2 pr-4">{log.ranked_results}</td>
+                              <td className="py-2 pr-4">{log.choice_1}</td>
+                              <td className="py-2 pr-4">{log.choice_2}</td>
+                              <td className="py-2 pr-4">{log.choice_3}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Panneau tests */}
               <div className="bg-white rounded-xl shadow p-4 mb-8">
@@ -737,7 +833,7 @@
               {/* Footer */}
               <div className="text-center text-xs text-gray-500 mb-8">
                 <p>
-                  Format du bordereau : <code className="bg-gray-100 px-1 rounded">23/{currentYear}/#####</code> — Le type de camion influe sur les tarifs (Baché vs Plateau).
+                  Format du bordereau : <code className="bg-gray-100 px-1 rounded">23/{currentYear}/####</code> — Le type de camion influe sur les tarifs (Baché vs Plateau).
                 </p>
               </div>
             </div>
