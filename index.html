@@ -49,105 +49,6 @@
           : null;
 
       // --- Données de base ---
-      const FALLBACK_DEPARTMENTS = [
-        { id: 1, code: '01', name: 'Ain', km: 620 },
-        { id: 2, code: '02', name: 'Aisne', km: 240 },
-        { id: 3, code: '03', name: 'Allier', km: 580 },
-        { id: 4, code: '04', name: 'Alpes-de-Haute-Provence', km: 880 },
-        { id: 5, code: '05', name: 'Hautes-Alpes', km: 850 },
-        { id: 6, code: '06', name: 'Alpes-Maritimes', km: 1000 },
-        { id: 7, code: '07', name: 'Ardèche', km: 680 },
-        { id: 8, code: '08', name: 'Ardennes', km: 120 },
-        { id: 9, code: '09', name: 'Ariège', km: 1100 },
-        { id: 10, code: '10', name: 'Aube', km: 310 },
-        { id: 11, code: '11', name: 'Aude', km: 1050 },
-        { id: 12, code: '12', name: 'Aveyron', km: 900 },
-        { id: 13, code: '13', name: 'Bouches-du-Rhône', km: 850 },
-        { id: 14, code: '14', name: 'Calvados', km: 450 },
-        { id: 15, code: '15', name: 'Cantal', km: 780 },
-        { id: 16, code: '16', name: 'Charente', km: 720 },
-        { id: 17, code: '17', name: 'Charente-Maritime', km: 780 },
-        { id: 18, code: '18', name: 'Cher', km: 550 },
-        { id: 19, code: '19', name: 'Corrèze', km: 740 },
-        { id: 20, code: '2A', name: 'Corse-du-Sud', km: 1200 },
-        { id: 21, code: '2B', name: 'Haute-Corse', km: 1180 },
-        { id: 22, code: '21', name: "Côte-d'Or", km: 450 },
-        { id: 23, code: '22', name: "Côtes-d'Armor", km: 680 },
-        { id: 24, code: '23', name: 'Creuse', km: 700 },
-        { id: 25, code: '24', name: 'Dordogne', km: 820 },
-        { id: 26, code: '25', name: 'Doubs', km: 480 },
-        { id: 27, code: '26', name: 'Drôme', km: 720 },
-        { id: 28, code: '27', name: 'Eure', km: 400 },
-        { id: 29, code: '28', name: 'Eure-et-Loir', km: 450 },
-        { id: 30, code: '29', name: 'Finistère', km: 850 },
-        { id: 31, code: '30', name: 'Gard', km: 850 },
-        { id: 32, code: '31', name: 'Haute-Garonne', km: 1050 },
-        { id: 33, code: '32', name: 'Gers', km: 1000 },
-        { id: 34, code: '33', name: 'Gironde', km: 900 },
-        { id: 35, code: '34', name: 'Hérault', km: 950 },
-        { id: 36, code: '35', name: 'Ille-et-Vilaine', km: 620 },
-        { id: 37, code: '36', name: 'Indre', km: 600 },
-        { id: 38, code: '37', name: 'Indre-et-Loire', km: 550 },
-        { id: 39, code: '38', name: 'Isère', km: 680 },
-        { id: 40, code: '39', name: 'Jura', km: 520 },
-        { id: 41, code: '40', name: 'Landes', km: 950 },
-        { id: 42, code: '41', name: 'Loir-et-Cher', km: 500 },
-        { id: 43, code: '42', name: 'Loire', km: 650 },
-        { id: 44, code: '43', name: 'Haute-Loire', km: 720 },
-        { id: 45, code: '44', name: 'Loire-Atlantique', km: 680 },
-        { id: 46, code: '45', name: 'Loiret', km: 480 },
-        { id: 47, code: '46', name: 'Lot', km: 880 },
-        { id: 48, code: '47', name: 'Lot-et-Garonne', km: 900 },
-        { id: 49, code: '48', name: 'Lozère', km: 850 },
-        { id: 50, code: '49', name: 'Maine-et-Loire', km: 600 },
-        { id: 51, code: '50', name: 'Manche', km: 550 },
-        { id: 52, code: '51', name: 'Marne', km: 200 },
-        { id: 53, code: '52', name: 'Haute-Marne', km: 350 },
-        { id: 54, code: '53', name: 'Mayenne', km: 580 },
-        { id: 55, code: '54', name: 'Meurthe-et-Moselle', km: 180 },
-        { id: 56, code: '55', name: 'Meuse', km: 150 },
-        { id: 57, code: '56', name: 'Morbihan', km: 750 },
-        { id: 58, code: '57', name: 'Moselle', km: 200 },
-        { id: 59, code: '58', name: 'Nièvre', km: 520 },
-        { id: 60, code: '59', name: 'Nord', km: 180 },
-        { id: 61, code: '60', name: 'Oise', km: 300 },
-        { id: 62, code: '61', name: 'Orne', km: 500 },
-        { id: 63, code: '62', name: 'Pas-de-Calais', km: 250 },
-        { id: 64, code: '63', name: 'Puy-de-Dôme', km: 680 },
-        { id: 65, code: '64', name: 'Pyrénées-Atlantiques', km: 1100 },
-        { id: 66, code: '65', name: 'Hautes-Pyrénées', km: 1080 },
-        { id: 67, code: '66', name: 'Pyrénées-Orientales', km: 1150 },
-        { id: 68, code: '67', name: 'Bas-Rhin', km: 350 },
-        { id: 69, code: '68', name: 'Haut-Rhin', km: 420 },
-        { id: 70, code: '69', name: 'Rhône', km: 620 },
-        { id: 71, code: '70', name: 'Haute-Saône', km: 430 },
-        { id: 72, code: '71', name: 'Saône-et-Loire', km: 520 },
-        { id: 73, code: '72', name: 'Sarthe', km: 550 },
-        { id: 74, code: '73', name: 'Savoie', km: 700 },
-        { id: 75, code: '74', name: 'Haute-Savoie', km: 650 },
-        { id: 76, code: '75', name: 'Paris', km: 320 },
-        { id: 77, code: '76', name: 'Seine-Maritime', km: 400 },
-        { id: 78, code: '77', name: 'Seine-et-Marne', km: 350 },
-        { id: 79, code: '78', name: 'Yvelines', km: 350 },
-        { id: 80, code: '79', name: 'Deux-Sèvres', km: 650 },
-        { id: 81, code: '80', name: 'Somme', km: 280 },
-        { id: 82, code: '81', name: 'Tarn', km: 1000 },
-        { id: 83, code: '82', name: 'Tarn-et-Garonne', km: 950 },
-        { id: 84, code: '83', name: 'Var', km: 950 },
-        { id: 85, code: '84', name: 'Vaucluse', km: 800 },
-        { id: 86, code: '85', name: 'Vendée', km: 700 },
-        { id: 87, code: '86', name: 'Vienne', km: 630 },
-        { id: 88, code: '87', name: 'Haute-Vienne', km: 700 },
-        { id: 89, code: '88', name: 'Vosges', km: 300 },
-        { id: 90, code: '89', name: 'Yonne', km: 420 },
-        { id: 91, code: '90', name: 'Territoire de Belfort', km: 450 },
-        { id: 92, code: '91', name: 'Essonne', km: 340 },
-        { id: 93, code: '92', name: 'Hauts-de-Seine', km: 320 },
-        { id: 94, code: '93', name: 'Seine-Saint-Denis', km: 330 },
-        { id: 95, code: '94', name: 'Val-de-Marne', km: 340 },
-        { id: 96, code: '95', name: "Val-d'Oise", km: 330 }
-      ];
-
       // Calcul d'itinéraire optimal (plus proche -> plus éloigné, en terminant par le plus loin)
       const calculateOptimalRoute = (selectedDeptIds, departments) => {
         if (selectedDeptIds.length === 0) return [];
@@ -171,14 +72,6 @@
       const BORDEREAU_REGEX = new RegExp(`^23\/${currentYear}\/([1-9]\d{0,3})$`);
 
       // Transporteurs par défaut basés sur la distance Supabase
-      const createDefaultTransporters = (departments) => {
-        if (!departments || departments.length === 0) return [];
-
-        const toNumber = (value) => {
-          const numeric = Number(value);
-          return Number.isFinite(numeric) ? numeric : 0;
-        };
-
         return [
           {
             id: 1,
@@ -223,8 +116,9 @@
         const [bordereau, setBordereau] = useState('');
         const [bordereauTouched, setBordereauTouched] = useState(false);
 
-        // Transporteurs avec deux tarifs par département
-        const transporters = useMemo(() => createDefaultTransporters(departments), [departments]);
+        const [transporters, setTransporters] = useState([]);
+        const [transportersLoading, setTransportersLoading] = useState(true);
+        const [transportersError, setTransportersError] = useState('');
 
         const [selectedDepts, setSelectedDepts] = useState([]);
         const [searchTerm, setSearchTerm] = useState('');
@@ -242,7 +136,7 @@
           const loadDepartments = async () => {
             if (!supabaseClient) {
               if (!isMounted) return;
-              setDepartments(FALLBACK_DEPARTMENTS);
+              setDepartments([]);
               setDepartmentsError('Client Supabase non initialisé.');
               setDepartmentsLoading(false);
               return;
@@ -273,7 +167,7 @@
 
             if (fetchError) {
               console.error('[Departements] Chargement impossible', fetchError);
-              setDepartments(FALLBACK_DEPARTMENTS);
+              setDepartments([]);
               setDepartmentsError("Impossible de charger les départements depuis Supabase.");
             } else {
               setDepartments(Array.isArray(fetchedData) ? fetchedData : []);
@@ -301,6 +195,102 @@
           });
           return map;
         }, [departments]);
+
+        const departmentByCode = useMemo(() => {
+          const map = new Map();
+          departments.forEach(dept => {
+            map.set(dept.code, dept);
+          });
+          return map;
+        }, [departments]);
+
+        useEffect(() => {
+          if (!supabaseClient) {
+            setTransporters([]);
+            setTransportersError('Client Supabase non initialisé.');
+            setTransportersLoading(false);
+            return;
+          }
+
+          if (departments.length === 0) {
+            setTransporters([]);
+            setTransportersError('');
+            setTransportersLoading(false);
+            return;
+          }
+
+          let isMounted = true;
+
+          const loadTransporters = async () => {
+            setTransportersLoading(true);
+            const { data, error } = await supabaseClient
+              .from('v_tarifs_complets')
+              .select('department_code, transporteur_nom, prix_bache, prix_plateau, km_depuis_sprimont')
+              .order('transporteur_nom', { ascending: true })
+              .order('department_code', { ascending: true });
+
+            if (!isMounted) return;
+
+            if (error) {
+              console.error('[Transporteurs] Chargement impossible', error);
+              setTransporters([]);
+              setTransportersError("Impossible de charger les transporteurs depuis Supabase.");
+            } else {
+              const transporterMap = new Map();
+              const toNumber = (value) => {
+                const numeric = Number(value);
+                return Number.isFinite(numeric) ? numeric : 0;
+              };
+
+              (data || []).forEach(row => {
+                const dept = departmentByCode.get(row.department_code);
+                if (!dept) return;
+
+                const transporterName = row.transporteur_nom || 'Transporteur';
+                if (!transporterMap.has(transporterName)) {
+                  transporterMap.set(transporterName, {
+                    id: transporterName,
+                    name: transporterName,
+                    hasBreakOfCharge: false,
+                    breakOfChargeCost: 0,
+                    rates: []
+                  });
+                }
+
+                const transporter = transporterMap.get(transporterName);
+                transporter.rates.push({
+                  deptId: dept.id,
+                  departmentCode: dept.code,
+                  tarpsCost: toNumber(row.prix_bache),
+                  flatbedCost: toNumber(row.prix_plateau),
+                  kmFromSprimont: toNumber(row.km_depuis_sprimont)
+                });
+              });
+
+              const normalizedTransporters = Array.from(transporterMap.values()).map((transporter) => ({
+                ...transporter,
+                rates: transporter.rates
+                  .slice()
+                  .sort((a, b) => {
+                    const codeA = a.departmentCode || '';
+                    const codeB = b.departmentCode || '';
+                    return codeA.localeCompare(codeB, 'fr', { numeric: true, sensitivity: 'base' });
+                  })
+              }));
+
+              setTransporters(normalizedTransporters);
+              setTransportersError('');
+            }
+
+            setTransportersLoading(false);
+          };
+
+          loadTransporters();
+
+          return () => {
+            isMounted = false;
+          };
+        }, [departments, departmentByCode]);
 
         useEffect(() => {
           if (!supabaseClient) return;
@@ -442,7 +432,7 @@
         const [selfTests, setSelfTests] = useState([]);
         useEffect(() => {
           const YEAR = new Date().getFullYear();
-          const dataset = departments.length ? departments : FALLBACK_DEPARTMENTS;
+          const dataset = departments;
           const results = [];
 
           const sampleShort = `23/${YEAR}/1`;
@@ -596,7 +586,7 @@
                   <button
                     onClick={onSearch}
                     className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-60"
-                    disabled={!isBordereauValid || !truckType || selectedDepts.length === 0 || departmentsLoading || transporters.length === 0}
+                    disabled={!isBordereauValid || !truckType || selectedDepts.length === 0 || departmentsLoading || transportersLoading || transporters.length === 0}
                     title={!isBordereauValid
                       ? 'Bordereau requis'
                       : !truckType
@@ -604,7 +594,9 @@
                       : selectedDepts.length === 0
                       ? 'Sélectionnez au moins un département'
                       : departmentsLoading
-                      ? 'Chargement des données en cours'
+                      ? 'Chargement des départements en cours'
+                      : transportersLoading
+                      ? 'Chargement des transporteurs en cours'
                       : transporters.length === 0
                       ? 'Aucun transporteur disponible'
                       : 'Lancer la recherche'}
@@ -685,12 +677,21 @@
                   </p>
                 )}
 
+                {transportersError && !transportersLoading && (
+                  <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+                    {transportersError}
+                  </p>
+                )}
+
                 {departmentsLoading ? (
+                  <p className="text-sm text-gray-500">Chargement des départements...</p>
+                ) : transportersLoading ? (
                   <p className="text-sm text-gray-500">Chargement des transporteurs...</p>
                 ) : (
                   <>
                     <p className="text-sm text-gray-500 mb-4">
-                      Les tarifs sont préconfigurés et seront prochainement gérés depuis Supabase.
+                      Tarifs synchronisés depuis Supabase (vue{' '}
+                      <code className="bg-gray-100 px-1 rounded">v_tarifs_complets</code>).
                     </p>
                     <div className="space-y-4 max-h-[30rem] overflow-y-auto pr-1">
                       {transporters.length === 0 ? (
