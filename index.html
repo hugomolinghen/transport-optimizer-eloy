@@ -272,15 +272,19 @@
 
           const rankedResults = [];
 
-          transporters.forEach((transporter) => {
-            let totalCost = 0;
+          for (const transporter of transporters) {
+            let furthestCost = 0;
+            let furthestDeptDetail = "";
             const details = [];
+            let isValid = true;
 
             for (let idx = 0; idx < optimalRoute.length; idx += 1) {
               const dept = optimalRoute[idx];
               const rate = transporter.rates.find((r) => r.deptId === dept.id);
+
               if (!rate) {
-                return;
+                isValid = false;
+                break;
               }
 
               const rawCost =
@@ -288,26 +292,43 @@
               const parsed = parseTariff(rawCost);
 
               if (!parsed.available) {
-                return;
+                isValid = false;
+                break;
               }
 
-              totalCost += parsed.value;
               details.push(
                 `${idx + 1}. ${dept.name} (${dept.km} km): ${parsed.value.toFixed(2)}€`
               );
+
+              if (parsed.value >= furthestCost) {
+                furthestCost = parsed.value;
+                furthestDeptDetail = `${dept.name} (${dept.km} km)`;
+              }
             }
+
+            if (!isValid) {
+              continue;
+            }
+
+            if (furthestDeptDetail) {
+              details.push(
+                `→ Coût retenu (département le plus éloigné : ${furthestDeptDetail}) : ${furthestCost.toFixed(2)}€`
+              );
+            }
+
+            let totalCost = furthestCost;
 
             if (transporter.hasBreakOfCharge) {
               const breakCost = Number(transporter.breakOfChargeCost);
               if (!Number.isFinite(breakCost) || breakCost < 0) {
-                return;
+                continue;
               }
               totalCost += breakCost;
               details.push(`+ Rupture de charge : ${breakCost.toFixed(2)}€`);
             }
 
             rankedResults.push({ transporter, totalCost, details });
-          });
+          }
 
           return rankedResults.sort((a, b) => a.totalCost - b.totalCost);
         }, [optimalRoute, transporters, truckType]);
