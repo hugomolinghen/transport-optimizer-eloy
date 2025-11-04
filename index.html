@@ -40,8 +40,26 @@
        *  COMPOSANT PRINCIPAL REACT
        ********************************************/
       const { useState, useEffect, useMemo } = React;
-      const { Truck, MapPin, Calculator, Search, AlertCircle } =
-        window.lucideReact || window.LucideReact || {};
+      const lucide =
+        window.lucideReact || window.LucideReact || window.lucide || {};
+
+      const createFallbackIcon = (emoji) =>
+        function FallbackIcon({ className = "", size = 24 }) {
+          return (
+            <span
+              className={className}
+              style={{ fontSize: size, lineHeight: 1 }}
+              role="img"
+              aria-hidden="true"
+            >
+              {emoji}
+            </span>
+          );
+        };
+
+      const TruckIcon = lucide.Truck || createFallbackIcon("🚚");
+      const CalculatorIcon = lucide.Calculator || createFallbackIcon("🧮");
+      const SearchIcon = lucide.Search || createFallbackIcon("🔍");
 
       /********************************************
        *  FONCTION: Calcul d’un itinéraire optimal
@@ -215,7 +233,7 @@
           <div className="max-w-7xl mx-auto p-6">
             {/* ======= HEADER ======= */}
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8 flex items-center gap-3">
-              <Truck className="text-indigo-600" size={32} />
+              <TruckIcon className="text-indigo-600" size={32} />
               <div>
                 <h1 className="text-3xl font-bold text-gray-800">
                   Optimiseur de Transporteur
@@ -277,7 +295,7 @@
                   className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 flex items-center justify-center gap-2"
                   disabled={!BORDEREAU_REGEX.test(bordereau) || !truckType || !selectedDepts.length}
                 >
-                  <Search size={18} /> Rechercher
+                  <SearchIcon size={18} /> Rechercher
                 </button>
               </div>
 
@@ -358,7 +376,7 @@
             {hasSearched && bestTransporters.length > 0 && (
               <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
                 <div className="flex items-center gap-3 mb-6">
-                  <Calculator className="text-green-600" size={28} />
+                  <CalculatorIcon className="text-green-600" size={28} />
                   <h2 className="text-2xl font-bold text-gray-800">Résultats du Calcul</h2>
                 </div>
 
