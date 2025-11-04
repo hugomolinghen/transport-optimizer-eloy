@@ -260,15 +260,9 @@
 
                 const rawCost =
                   truckType === "bache" ? rate.tarpsCost : rate.flatbedCost;
-
-                if (rawCost === null || rawCost === undefined || rawCost === "") {
-                  hasCompletePricing = false;
-                  return;
-                }
-
                 const numericCost = Number(rawCost);
 
-                if (!Number.isFinite(numericCost) || numericCost <= 0) {
+                if (!Number.isFinite(numericCost)) {
                   hasCompletePricing = false;
                   return;
                 }
@@ -405,17 +399,15 @@
         return (
           <div className="max-w-7xl mx-auto p-6">
             {/* ======= HEADER ======= */}
-            <div className="bg-white rounded-xl shadow-lg p-6 mb-8 flex items-center justify-between gap-6">
-              <div className="flex items-center gap-3">
-                <TruckIcon className="text-indigo-600" size={32} />
-                <div>
-                  <h1 className="text-3xl font-bold text-gray-800">
-                    Optimiseur de Transporteur
-                  </h1>
-                  <p className="text-sm text-gray-500">
-                    Données en temps réel depuis Supabase
-                  </p>
-                </div>
+            <div className="bg-white rounded-xl shadow-lg p-6 mb-8 flex items-center gap-3">
+              <TruckIcon className="text-indigo-600" size={32} />
+              <div>
+                <h1 className="text-3xl font-bold text-gray-800">
+                  Optimiseur de Transporteur
+                </h1>
+                <p className="text-sm text-gray-500">
+                  Données en temps réel depuis Supabase
+                </p>
               </div>
               <button
                 onClick={async () => {
