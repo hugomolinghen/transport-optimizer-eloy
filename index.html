@@ -60,6 +60,9 @@
       const TruckIcon = lucide.Truck || createFallbackIcon("🚚");
       const CalculatorIcon = lucide.Calculator || createFallbackIcon("🧮");
       const SearchIcon = lucide.Search || createFallbackIcon("🔍");
+      const RouteIcon = lucide.Route || lucide.Map || createFallbackIcon("🗺️");
+      const UnlockIcon = lucide.LockOpen || lucide.LogIn || createFallbackIcon("🔐");
+      const LogoutIcon = lucide.LogOut || createFallbackIcon("🚪");
 
       /********************************************
        *  FONCTION: Calcul d’un itinéraire optimal
@@ -86,6 +89,11 @@
         const [truckType, setTruckType] = useState(""); // "bache" ou "plateau"
         const [bordereau, setBordereau] = useState("");
         const [hasSearched, setHasSearched] = useState(false);
+        const [session, setSession] = useState(null);
+        const [authLoading, setAuthLoading] = useState(true);
+        const [authError, setAuthError] = useState("");
+        const [email, setEmail] = useState("");
+        const [password, setPassword] = useState("");
 
         const currentYear = new Date().getFullYear();
         const BORDEREAU_REGEX = new RegExp(`^23/${currentYear}/([1-9]\\d{0,3})$`);
@@ -94,6 +102,52 @@
          *  CHARGEMENT DES DONNÉES SUPABASE
          ********************************************/
         useEffect(() => {
+          let isMounted = true;
+
+          async function initAuth() {
+            try {
+              setAuthError("");
+              const {
+                data: { session },
+                error,
+              } = await supabase.auth.getSession();
+              if (error) throw error;
+              if (isMounted) setSession(session);
+            } catch (err) {
+              console.error("❌ Erreur d'authentification :", err);
+              if (isMounted)
+                setAuthError(err.message || "Impossible de vérifier la session Supabase.");
+            } finally {
+              if (isMounted) setAuthLoading(false);
+            }
+          }
+
+          const {
+            data: { subscription },
+          } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (isMounted) {
+              setSession(session);
+            }
+          });
+
+          initAuth();
+
+          return () => {
+            isMounted = false;
+            subscription.unsubscribe();
+          };
+        }, []);
+
+        useEffect(() => {
+          if (!session) {
+            setDepartments([]);
+            setTransporters([]);
+            setLoading(false);
+            return;
+          }
+
+          let isActive = true;
+
           async function loadData() {
             try {
               setLoading(true);
@@ -111,6 +165,7 @@
               console.log("✅ Données récupérées :", data);
 
               if (!data || data.length === 0) {
+                if (!isActive) return;
                 setError("Aucune donnée trouvée dans la vue v_tarifs_complets.");
                 setDepartments([]);
                 setTransporters([]);
@@ -158,18 +213,24 @@
                 }
               });
 
+              if (!isActive) return;
+
               setDepartments(deptList);
               setTransporters(Array.from(transpMap.values()));
             } catch (err) {
               console.error("❌ Erreur Supabase :", err);
-              setError(err.message || "Erreur inconnue");
+              if (isActive) setError(err.message || "Erreur inconnue");
             } finally {
-              setLoading(false);
+              if (isActive) setLoading(false);
             }
           }
 
           loadData();
-        }, []);
+
+          return () => {
+            isActive = false;
+          };
+        }, [session]);
 
         /********************************************
          *  CALCUL DU MEILLEUR TRANSPORTEUR
@@ -212,6 +273,80 @@
         /********************************************
          *  INTERFACE UTILISATEUR
          ********************************************/
+        if (authLoading)
+          return (
+            <div className="flex items-center justify-center h-screen text-gray-600">
+              <p>Vérification de la session Supabase...</p>
+            </div>
+          );
+
+        if (!session)
+          return (
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 p-6">
+              <div className="bg-white shadow-xl rounded-2xl p-8 w-full max-w-md space-y-6">
+                <div className="flex items-center gap-3">
+                  <UnlockIcon className="text-indigo-600" size={32} />
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-800">Connexion Supabase</h1>
+                    <p className="text-sm text-gray-500">
+                      Connectez-vous pour accéder aux données transporteurs.
+                    </p>
+                  </div>
+                </div>
+                {authError && (
+                  <div className="bg-red-50 text-red-600 text-sm p-3 rounded">
+                    {authError}
+                  </div>
+                )}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                      placeholder="vous@exemple.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Mot de passe
+                    </label>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        setAuthError("");
+                        const { error } = await supabase.auth.signInWithPassword({
+                          email,
+                          password,
+                        });
+                        if (error) throw error;
+                      } catch (err) {
+                        console.error("❌ Erreur de connexion :", err);
+                        setAuthError(err.message || "Impossible de se connecter.");
+                      }
+                    }}
+                    className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+                    disabled={!email || !password}
+                  >
+                    Se connecter
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+
         if (loading)
           return (
             <div className="flex items-center justify-center h-screen text-gray-600">
@@ -242,6 +377,14 @@
                   Données en temps réel depuis Supabase
                 </p>
               </div>
+              <button
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                }}
+                className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+              >
+                <LogoutIcon size={18} /> Déconnexion
+              </button>
             </div>
 
             {/* ======= FORMULAIRE CRITÈRES ======= */}
@@ -301,7 +444,17 @@
 
               {/* ======= LISTE DES DÉPARTEMENTS ======= */}
               <div className="md:col-span-2 bg-white rounded-xl shadow-lg p-6">
-                <h2 className="text-lg font-semibold mb-4">Départements</h2>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold">Départements</h2>
+                  <button
+                    onClick={() => {
+                      setSelectedDepts([]);
+                    }}
+                    className="text-sm text-indigo-600 hover:text-indigo-800"
+                  >
+                    Tout décocher
+                  </button>
+                </div>
 
                 <div className="max-h-80 overflow-y-auto space-y-2">
                   {departments.map((dept) => (
@@ -332,6 +485,43 @@
                   ))}
                 </div>
               </div>
+            </div>
+
+            {/* ======= SECTION TRAJET ======= */}
+            <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+              <div className="flex items-center gap-3 mb-4">
+                <RouteIcon className="text-indigo-600" size={28} />
+                <h2 className="text-xl font-bold text-gray-800">Trajet</h2>
+              </div>
+              {selectedDepts.length === 0 ? (
+                <p className="text-gray-500">Sélectionnez des départements pour visualiser l'ordre de livraison.</p>
+              ) : optimalRoute.length === 0 ? (
+                <p className="text-gray-500">Impossible de calculer l'itinéraire.</p>
+              ) : (
+                <ol className="space-y-2 text-sm text-gray-700">
+                  <li className="flex items-center gap-2">
+                    <span className="inline-flex items-center justify-center w-6 h-6 bg-green-100 text-green-700 rounded-full text-xs font-semibold">
+                      0
+                    </span>
+                    <div>
+                      <strong>Départ :</strong> Sprimont
+                    </div>
+                  </li>
+                  {optimalRoute.map((dept, index) => (
+                    <li key={dept.id} className="flex items-start gap-2">
+                      <span className="inline-flex items-center justify-center w-6 h-6 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
+                        {index + 1}
+                      </span>
+                      <div>
+                        <div className="font-semibold">
+                          {dept.code} - {dept.name}
+                        </div>
+                        <div className="text-xs text-gray-500">{dept.km} km depuis Sprimont</div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
 
             {/* ======= SECTION TRANSPORTEURS ======= */}
