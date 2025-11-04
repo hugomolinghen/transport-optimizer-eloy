@@ -243,29 +243,50 @@
         const bestTransporters = useMemo(() => {
           if (!selectedDepts.length || !truckType || !transporters.length) return [];
 
-          const results = transporters.map((transporter) => {
-            let totalCost = 0;
-            const details = [];
+          const results = transporters
+            .map((transporter) => {
+              let totalCost = 0;
+              const details = [];
+              let hasCompletePricing = true;
 
-            optimalRoute.forEach((dept, idx) => {
-              const rate = transporter.rates.find((r) => r.deptId === dept.id);
-              if (rate) {
-                const cost =
+              optimalRoute.forEach((dept, idx) => {
+                if (!hasCompletePricing) return;
+
+                const rate = transporter.rates.find((r) => r.deptId === dept.id);
+                if (!rate) {
+                  hasCompletePricing = false;
+                  return;
+                }
+
+                const rawCost =
                   truckType === "bache" ? rate.tarpsCost : rate.flatbedCost;
-                totalCost += cost;
+                const numericCost = Number(rawCost);
+
+                if (!Number.isFinite(numericCost)) {
+                  hasCompletePricing = false;
+                  return;
+                }
+
+                totalCost += numericCost;
                 details.push(
-                  `${idx + 1}. ${dept.name} (${dept.km} km): ${cost.toFixed(2)}€`
+                  `${idx + 1}. ${dept.name} (${dept.km} km): ${numericCost.toFixed(2)}€`
                 );
+              });
+
+              if (!hasCompletePricing) return null;
+
+              if (transporter.hasBreakOfCharge) {
+                const breakCost = Number(transporter.breakOfChargeCost);
+                if (!Number.isFinite(breakCost)) {
+                  return null;
+                }
+                totalCost += breakCost;
+                details.push(`+ Rupture de charge : ${breakCost.toFixed(2)}€`);
               }
-            });
 
-            if (transporter.hasBreakOfCharge) {
-              totalCost += transporter.breakOfChargeCost;
-              details.push(`+ Rupture de charge : ${transporter.breakOfChargeCost}€`);
-            }
-
-            return { transporter, totalCost, details };
-          });
+              return { transporter, totalCost, details };
+            })
+            .filter(Boolean);
 
           return results.sort((a, b) => a.totalCost - b.totalCost);
         }, [optimalRoute, transporters, truckType]);
@@ -604,6 +625,16 @@
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+            {hasSearched && selectedDepts.length > 0 && bestTransporters.length === 0 && (
+              <div className="bg-white rounded-xl shadow-lg p-6 mb-8 text-gray-600">
+                <h2 className="text-xl font-semibold mb-2">Tarifs indisponibles</h2>
+                <p>
+                  Aucun transporteur ne propose actuellement de tarifs complets pour tous les
+                  départements sélectionnés. Essayez de modifier votre sélection ou contactez un
+                  administrateur pour mettre à jour la base de données.
+                </p>
               </div>
             )}
           </div>
