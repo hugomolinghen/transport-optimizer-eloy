@@ -288,7 +288,7 @@
             })
             .filter(Boolean);
 
-          return results.sort((a, b) => a.totalCost - b.totalCost);
+          return rankedResults.sort((a, b) => a.totalCost - b.totalCost);
         }, [optimalRoute, transporters, truckType]);
 
         const formatTruckRate = (rawCost) => {
