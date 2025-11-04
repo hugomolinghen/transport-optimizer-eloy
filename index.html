@@ -40,18 +40,6 @@
        *  COMPOSANT PRINCIPAL REACT
        ********************************************/
       const { useState, useEffect, useMemo } = React;
-      // Correction : sécuriser le chargement des icônes Lucide pour éviter le crash React #130
-const LUCIDE_GLOBAL =
-  (typeof window !== "undefined" && (window.lucideReact || window.LucideReact)) || {};
-const NullIcon = () => null;
-const {
-  Truck = NullIcon,
-  MapPin = NullIcon,
-  Calculator = NullIcon,
-  Search = NullIcon,
-  AlertCircle = NullIcon,
-} = LUCIDE_GLOBAL;
-
       const { Truck, MapPin, Calculator, Search, AlertCircle } =
         window.lucideReact || window.LucideReact || {};
 
