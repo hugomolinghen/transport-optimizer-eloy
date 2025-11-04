@@ -184,7 +184,7 @@
               const { data, error } = await supabase
                 .from("v_tarifs_complets")
                 .select(
-                  "transporteur_id, transporteur_nom, break_of_charge, break_of_charge_cost, departement_code, departement_nom, km_depuis_sprimont, prix_bache, prix_plateau"
+                  "transporteur_id, transporteur_nom, break_of_charge, break_of_charge_cost, departement_code, departement_nom, km, prix_bache, prix_plateau"
                 );
 
               if (error) throw error;
@@ -207,7 +207,7 @@
                     id: index + 1,
                     code: row.departement_code,
                     name: row.departement_nom,
-                    km: row.km_depuis_sprimont,
+                    km: row.km,
                   });
                 }
               });
@@ -235,7 +235,7 @@
                     departmentCode: dept.code,
                     tarpsCost: row.prix_bache,
                     flatbedCost: row.prix_plateau,
-                    kmFromSprimont: row.km_depuis_sprimont,
+                    kmFromSprimont: row.km,
                   });
                 }
               });
