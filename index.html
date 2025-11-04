@@ -291,6 +291,17 @@
           return results.sort((a, b) => a.totalCost - b.totalCost);
         }, [optimalRoute, transporters, truckType]);
 
+        const formatTruckRate = (rawCost) => {
+          if (rawCost === null || rawCost === undefined || rawCost === "") {
+            return "Tarif indisponible";
+          }
+          const numericCost = Number(rawCost);
+          if (!Number.isFinite(numericCost) || numericCost <= 0) {
+            return "Tarif indisponible";
+          }
+          return `${numericCost.toFixed(2)}€`;
+        };
+
         /********************************************
          *  INTERFACE UTILISATEUR
          ********************************************/
@@ -571,8 +582,8 @@
                           return (
                             <li key={dept.code}>
                               <strong>{dept.code} - {dept.name}</strong> :
-                              <span className="ml-2">Baché {rate.tarpsCost}€</span> |
-                              <span className="ml-2">Plateau {rate.flatbedCost}€</span>
+                              <span className="ml-2">Baché {formatTruckRate(rate.tarpsCost)}</span> |
+                              <span className="ml-2">Plateau {formatTruckRate(rate.flatbedCost)}</span>
                             </li>
                           );
                         })}
