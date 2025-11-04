@@ -64,6 +64,33 @@
       const UnlockIcon = lucide.LockOpen || lucide.LogIn || createFallbackIcon("🔐");
       const LogoutIcon = lucide.LogOut || createFallbackIcon("🚪");
 
+      const parseTariff = (rawCost) => {
+        if (rawCost === null || rawCost === undefined) {
+          return { available: false };
+        }
+
+        if (typeof rawCost === "number") {
+          if (!Number.isFinite(rawCost) || rawCost <= 0) {
+            return { available: false };
+          }
+          return { available: true, value: rawCost };
+        }
+
+        if (typeof rawCost === "string") {
+          const normalized = rawCost.replace(",", ".").trim();
+          if (!normalized) {
+            return { available: false };
+          }
+          const numericCost = Number(normalized);
+          if (!Number.isFinite(numericCost) || numericCost <= 0) {
+            return { available: false };
+          }
+          return { available: true, value: numericCost };
+        }
+
+        return { available: false };
+      };
+
       /********************************************
        *  FONCTION: Calcul d’un itinéraire optimal
        *  (départements triés du plus proche au plus éloigné)
@@ -243,63 +270,54 @@
         const bestTransporters = useMemo(() => {
           if (!selectedDepts.length || !truckType || !transporters.length) return [];
 
-          const results = transporters
-            .map((transporter) => {
-              let totalCost = 0;
-              const details = [];
-              let hasCompletePricing = true;
+          const rankedResults = [];
 
-              optimalRoute.forEach((dept, idx) => {
-                if (!hasCompletePricing) return;
+          transporters.forEach((transporter) => {
+            let totalCost = 0;
+            const details = [];
 
-                const rate = transporter.rates.find((r) => r.deptId === dept.id);
-                if (!rate) {
-                  hasCompletePricing = false;
-                  return;
-                }
-
-                const rawCost =
-                  truckType === "bache" ? rate.tarpsCost : rate.flatbedCost;
-                const numericCost = Number(rawCost);
-
-                if (!Number.isFinite(numericCost)) {
-                  hasCompletePricing = false;
-                  return;
-                }
-
-                totalCost += numericCost;
-                details.push(
-                  `${idx + 1}. ${dept.name} (${dept.km} km): ${numericCost.toFixed(2)}€`
-                );
-              });
-
-              if (!hasCompletePricing) return null;
-
-              if (transporter.hasBreakOfCharge) {
-                const breakCost = Number(transporter.breakOfChargeCost);
-                if (!Number.isFinite(breakCost)) {
-                  return null;
-                }
-                totalCost += breakCost;
-                details.push(`+ Rupture de charge : ${breakCost.toFixed(2)}€`);
+            for (let idx = 0; idx < optimalRoute.length; idx += 1) {
+              const dept = optimalRoute[idx];
+              const rate = transporter.rates.find((r) => r.deptId === dept.id);
+              if (!rate) {
+                return;
               }
 
-              return { transporter, totalCost, details };
-            })
-            .filter(Boolean);
+              const rawCost =
+                truckType === "bache" ? rate.tarpsCost : rate.flatbedCost;
+              const parsed = parseTariff(rawCost);
 
-          return results.sort((a, b) => a.totalCost - b.totalCost);
+              if (!parsed.available) {
+                return;
+              }
+
+              totalCost += parsed.value;
+              details.push(
+                `${idx + 1}. ${dept.name} (${dept.km} km): ${parsed.value.toFixed(2)}€`
+              );
+            }
+
+            if (transporter.hasBreakOfCharge) {
+              const breakCost = Number(transporter.breakOfChargeCost);
+              if (!Number.isFinite(breakCost) || breakCost < 0) {
+                return;
+              }
+              totalCost += breakCost;
+              details.push(`+ Rupture de charge : ${breakCost.toFixed(2)}€`);
+            }
+
+            rankedResults.push({ transporter, totalCost, details });
+          });
+
+          return rankedResults.sort((a, b) => a.totalCost - b.totalCost);
         }, [optimalRoute, transporters, truckType]);
 
         const formatTruckRate = (rawCost) => {
-          if (rawCost === null || rawCost === undefined || rawCost === "") {
+          const parsed = parseTariff(rawCost);
+          if (!parsed.available) {
             return "Tarif indisponible";
           }
-          const numericCost = Number(rawCost);
-          if (!Number.isFinite(numericCost) || numericCost <= 0) {
-            return "Tarif indisponible";
-          }
-          return `${numericCost.toFixed(2)}€`;
+          return `${parsed.value.toFixed(2)}€`;
         };
 
         /********************************************
@@ -399,15 +417,17 @@
         return (
           <div className="max-w-7xl mx-auto p-6">
             {/* ======= HEADER ======= */}
-            <div className="bg-white rounded-xl shadow-lg p-6 mb-8 flex items-center gap-3">
-              <TruckIcon className="text-indigo-600" size={32} />
-              <div>
-                <h1 className="text-3xl font-bold text-gray-800">
-                  Optimiseur de Transporteur
-                </h1>
-                <p className="text-sm text-gray-500">
-                  Données en temps réel depuis Supabase
-                </p>
+            <div className="bg-white rounded-xl shadow-lg p-6 mb-8 flex items-center justify-between gap-6">
+              <div className="flex items-center gap-3">
+                <TruckIcon className="text-indigo-600" size={32} />
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-800">
+                    Optimiseur de Transporteur
+                  </h1>
+                  <p className="text-sm text-gray-500">
+                    Données en temps réel depuis Supabase
+                  </p>
+                </div>
               </div>
               <button
                 onClick={async () => {
