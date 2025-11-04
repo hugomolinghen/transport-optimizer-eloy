@@ -40,8 +40,56 @@
        *  COMPOSANT PRINCIPAL REACT
        ********************************************/
       const { useState, useEffect, useMemo } = React;
-      const { Truck, MapPin, Calculator, Search, AlertCircle } =
-        window.lucideReact || window.LucideReact || {};
+      const lucide =
+        window.lucideReact || window.LucideReact || window.lucide || {};
+
+      const createFallbackIcon = (emoji) =>
+        function FallbackIcon({ className = "", size = 24 }) {
+          return (
+            <span
+              className={className}
+              style={{ fontSize: size, lineHeight: 1 }}
+              role="img"
+              aria-hidden="true"
+            >
+              {emoji}
+            </span>
+          );
+        };
+
+      const TruckIcon = lucide.Truck || createFallbackIcon("🚚");
+      const CalculatorIcon = lucide.Calculator || createFallbackIcon("🧮");
+      const SearchIcon = lucide.Search || createFallbackIcon("🔍");
+      const RouteIcon = lucide.Route || lucide.Map || createFallbackIcon("🗺️");
+      const UnlockIcon = lucide.LockOpen || lucide.LogIn || createFallbackIcon("🔐");
+      const LogoutIcon = lucide.LogOut || createFallbackIcon("🚪");
+
+      const parseTariff = (rawCost) => {
+        if (rawCost === null || rawCost === undefined) {
+          return { available: false };
+        }
+
+        if (typeof rawCost === "number") {
+          if (!Number.isFinite(rawCost) || rawCost <= 0) {
+            return { available: false };
+          }
+          return { available: true, value: rawCost };
+        }
+
+        if (typeof rawCost === "string") {
+          const normalized = rawCost.replace(",", ".").trim();
+          if (!normalized) {
+            return { available: false };
+          }
+          const numericCost = Number(normalized);
+          if (!Number.isFinite(numericCost) || numericCost <= 0) {
+            return { available: false };
+          }
+          return { available: true, value: numericCost };
+        }
+
+        return { available: false };
+      };
 
       /********************************************
        *  FONCTION: Calcul d’un itinéraire optimal
@@ -68,6 +116,11 @@
         const [truckType, setTruckType] = useState(""); // "bache" ou "plateau"
         const [bordereau, setBordereau] = useState("");
         const [hasSearched, setHasSearched] = useState(false);
+        const [session, setSession] = useState(null);
+        const [authLoading, setAuthLoading] = useState(true);
+        const [authError, setAuthError] = useState("");
+        const [email, setEmail] = useState("");
+        const [password, setPassword] = useState("");
 
         const currentYear = new Date().getFullYear();
         const BORDEREAU_REGEX = new RegExp(`^23/${currentYear}/([1-9]\\d{0,3})$`);
@@ -76,6 +129,52 @@
          *  CHARGEMENT DES DONNÉES SUPABASE
          ********************************************/
         useEffect(() => {
+          let isMounted = true;
+
+          async function initAuth() {
+            try {
+              setAuthError("");
+              const {
+                data: { session },
+                error,
+              } = await supabase.auth.getSession();
+              if (error) throw error;
+              if (isMounted) setSession(session);
+            } catch (err) {
+              console.error("❌ Erreur d'authentification :", err);
+              if (isMounted)
+                setAuthError(err.message || "Impossible de vérifier la session Supabase.");
+            } finally {
+              if (isMounted) setAuthLoading(false);
+            }
+          }
+
+          const {
+            data: { subscription },
+          } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (isMounted) {
+              setSession(session);
+            }
+          });
+
+          initAuth();
+
+          return () => {
+            isMounted = false;
+            subscription.unsubscribe();
+          };
+        }, []);
+
+        useEffect(() => {
+          if (!session) {
+            setDepartments([]);
+            setTransporters([]);
+            setLoading(false);
+            return;
+          }
+
+          let isActive = true;
+
           async function loadData() {
             try {
               setLoading(true);
@@ -93,6 +192,7 @@
               console.log("✅ Données récupérées :", data);
 
               if (!data || data.length === 0) {
+                if (!isActive) return;
                 setError("Aucune donnée trouvée dans la vue v_tarifs_complets.");
                 setDepartments([]);
                 setTransporters([]);
@@ -140,18 +240,24 @@
                 }
               });
 
+              if (!isActive) return;
+
               setDepartments(deptList);
               setTransporters(Array.from(transpMap.values()));
             } catch (err) {
               console.error("❌ Erreur Supabase :", err);
-              setError(err.message || "Erreur inconnue");
+              if (isActive) setError(err.message || "Erreur inconnue");
             } finally {
-              setLoading(false);
+              if (isActive) setLoading(false);
             }
           }
 
           loadData();
-        }, []);
+
+          return () => {
+            isActive = false;
+          };
+        }, [session]);
 
         /********************************************
          *  CALCUL DU MEILLEUR TRANSPORTEUR
@@ -164,36 +270,133 @@
         const bestTransporters = useMemo(() => {
           if (!selectedDepts.length || !truckType || !transporters.length) return [];
 
-          const results = transporters.map((transporter) => {
+          const rankedResults = [];
+
+          transporters.forEach((transporter) => {
             let totalCost = 0;
             const details = [];
 
-            optimalRoute.forEach((dept, idx) => {
+            for (let idx = 0; idx < optimalRoute.length; idx += 1) {
+              const dept = optimalRoute[idx];
               const rate = transporter.rates.find((r) => r.deptId === dept.id);
-              if (rate) {
-                const cost =
-                  truckType === "bache" ? rate.tarpsCost : rate.flatbedCost;
-                totalCost += cost;
-                details.push(
-                  `${idx + 1}. ${dept.name} (${dept.km} km): ${cost.toFixed(2)}€`
-                );
+              if (!rate) {
+                return;
               }
-            });
 
-            if (transporter.hasBreakOfCharge) {
-              totalCost += transporter.breakOfChargeCost;
-              details.push(`+ Rupture de charge : ${transporter.breakOfChargeCost}€`);
+              const rawCost =
+                truckType === "bache" ? rate.tarpsCost : rate.flatbedCost;
+              const parsed = parseTariff(rawCost);
+
+              if (!parsed.available) {
+                return;
+              }
+
+              totalCost += parsed.value;
+              details.push(
+                `${idx + 1}. ${dept.name} (${dept.km} km): ${parsed.value.toFixed(2)}€`
+              );
             }
 
-            return { transporter, totalCost, details };
+            if (transporter.hasBreakOfCharge) {
+              const breakCost = Number(transporter.breakOfChargeCost);
+              if (!Number.isFinite(breakCost) || breakCost < 0) {
+                return;
+              }
+              totalCost += breakCost;
+              details.push(`+ Rupture de charge : ${breakCost.toFixed(2)}€`);
+            }
+
+            rankedResults.push({ transporter, totalCost, details });
           });
 
-          return results.sort((a, b) => a.totalCost - b.totalCost);
+          return rankedResults.sort((a, b) => a.totalCost - b.totalCost);
         }, [optimalRoute, transporters, truckType]);
+
+        const formatTruckRate = (rawCost) => {
+          const parsed = parseTariff(rawCost);
+          if (!parsed.available) {
+            return "Tarif indisponible";
+          }
+          return `${parsed.value.toFixed(2)}€`;
+        };
 
         /********************************************
          *  INTERFACE UTILISATEUR
          ********************************************/
+        if (authLoading)
+          return (
+            <div className="flex items-center justify-center h-screen text-gray-600">
+              <p>Vérification de la session Supabase...</p>
+            </div>
+          );
+
+        if (!session)
+          return (
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 p-6">
+              <div className="bg-white shadow-xl rounded-2xl p-8 w-full max-w-md space-y-6">
+                <div className="flex items-center gap-3">
+                  <UnlockIcon className="text-indigo-600" size={32} />
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-800">Connexion Supabase</h1>
+                    <p className="text-sm text-gray-500">
+                      Connectez-vous pour accéder aux données transporteurs.
+                    </p>
+                  </div>
+                </div>
+                {authError && (
+                  <div className="bg-red-50 text-red-600 text-sm p-3 rounded">
+                    {authError}
+                  </div>
+                )}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                      placeholder="vous@exemple.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Mot de passe
+                    </label>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        setAuthError("");
+                        const { error } = await supabase.auth.signInWithPassword({
+                          email,
+                          password,
+                        });
+                        if (error) throw error;
+                      } catch (err) {
+                        console.error("❌ Erreur de connexion :", err);
+                        setAuthError(err.message || "Impossible de se connecter.");
+                      }
+                    }}
+                    className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+                    disabled={!email || !password}
+                  >
+                    Se connecter
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+
         if (loading)
           return (
             <div className="flex items-center justify-center h-screen text-gray-600">
@@ -214,16 +417,26 @@
         return (
           <div className="max-w-7xl mx-auto p-6">
             {/* ======= HEADER ======= */}
-            <div className="bg-white rounded-xl shadow-lg p-6 mb-8 flex items-center gap-3">
-              <Truck className="text-indigo-600" size={32} />
-              <div>
-                <h1 className="text-3xl font-bold text-gray-800">
-                  Optimiseur de Transporteur
-                </h1>
-                <p className="text-sm text-gray-500">
-                  Données en temps réel depuis Supabase
-                </p>
+            <div className="bg-white rounded-xl shadow-lg p-6 mb-8 flex items-center justify-between gap-6">
+              <div className="flex items-center gap-3">
+                <TruckIcon className="text-indigo-600" size={32} />
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-800">
+                    Optimiseur de Transporteur
+                  </h1>
+                  <p className="text-sm text-gray-500">
+                    Données en temps réel depuis Supabase
+                  </p>
+                </div>
               </div>
+              <button
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                }}
+                className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+              >
+                <LogoutIcon size={18} /> Déconnexion
+              </button>
             </div>
 
             {/* ======= FORMULAIRE CRITÈRES ======= */}
@@ -277,13 +490,23 @@
                   className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 flex items-center justify-center gap-2"
                   disabled={!BORDEREAU_REGEX.test(bordereau) || !truckType || !selectedDepts.length}
                 >
-                  <Search size={18} /> Rechercher
+                  <SearchIcon size={18} /> Rechercher
                 </button>
               </div>
 
               {/* ======= LISTE DES DÉPARTEMENTS ======= */}
               <div className="md:col-span-2 bg-white rounded-xl shadow-lg p-6">
-                <h2 className="text-lg font-semibold mb-4">Départements</h2>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold">Départements</h2>
+                  <button
+                    onClick={() => {
+                      setSelectedDepts([]);
+                    }}
+                    className="text-sm text-indigo-600 hover:text-indigo-800"
+                  >
+                    Tout décocher
+                  </button>
+                </div>
 
                 <div className="max-h-80 overflow-y-auto space-y-2">
                   {departments.map((dept) => (
@@ -316,6 +539,43 @@
               </div>
             </div>
 
+            {/* ======= SECTION TRAJET ======= */}
+            <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+              <div className="flex items-center gap-3 mb-4">
+                <RouteIcon className="text-indigo-600" size={28} />
+                <h2 className="text-xl font-bold text-gray-800">Trajet</h2>
+              </div>
+              {selectedDepts.length === 0 ? (
+                <p className="text-gray-500">Sélectionnez des départements pour visualiser l'ordre de livraison.</p>
+              ) : optimalRoute.length === 0 ? (
+                <p className="text-gray-500">Impossible de calculer l'itinéraire.</p>
+              ) : (
+                <ol className="space-y-2 text-sm text-gray-700">
+                  <li className="flex items-center gap-2">
+                    <span className="inline-flex items-center justify-center w-6 h-6 bg-green-100 text-green-700 rounded-full text-xs font-semibold">
+                      0
+                    </span>
+                    <div>
+                      <strong>Départ :</strong> Sprimont
+                    </div>
+                  </li>
+                  {optimalRoute.map((dept, index) => (
+                    <li key={dept.id} className="flex items-start gap-2">
+                      <span className="inline-flex items-center justify-center w-6 h-6 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
+                        {index + 1}
+                      </span>
+                      <div>
+                        <div className="font-semibold">
+                          {dept.code} - {dept.name}
+                        </div>
+                        <div className="text-xs text-gray-500">{dept.km} km depuis Sprimont</div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+
             {/* ======= SECTION TRANSPORTEURS ======= */}
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
               <h2 className="text-xl font-bold text-gray-800 mb-4">Transporteurs</h2>
@@ -342,8 +602,8 @@
                           return (
                             <li key={dept.code}>
                               <strong>{dept.code} - {dept.name}</strong> :
-                              <span className="ml-2">Baché {rate.tarpsCost}€</span> |
-                              <span className="ml-2">Plateau {rate.flatbedCost}€</span>
+                              <span className="ml-2">Baché {formatTruckRate(rate.tarpsCost)}</span> |
+                              <span className="ml-2">Plateau {formatTruckRate(rate.flatbedCost)}</span>
                             </li>
                           );
                         })}
@@ -358,7 +618,7 @@
             {hasSearched && bestTransporters.length > 0 && (
               <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
                 <div className="flex items-center gap-3 mb-6">
-                  <Calculator className="text-green-600" size={28} />
+                  <CalculatorIcon className="text-green-600" size={28} />
                   <h2 className="text-2xl font-bold text-gray-800">Résultats du Calcul</h2>
                 </div>
 
@@ -396,6 +656,16 @@
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+            {hasSearched && selectedDepts.length > 0 && bestTransporters.length === 0 && (
+              <div className="bg-white rounded-xl shadow-lg p-6 mb-8 text-gray-600">
+                <h2 className="text-xl font-semibold mb-2">Tarifs indisponibles</h2>
+                <p>
+                  Aucun transporteur ne propose actuellement de tarifs complets pour tous les
+                  départements sélectionnés. Essayez de modifier votre sélection ou contactez un
+                  administrateur pour mettre à jour la base de données.
+                </p>
               </div>
             )}
           </div>
