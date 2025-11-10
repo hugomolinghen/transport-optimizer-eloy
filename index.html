@@ -39,7 +39,7 @@
       /********************************************
        *  COMPOSANT PRINCIPAL REACT
        ********************************************/
-      const { useState, useEffect, useMemo, useCallback } = React;
+      const { useState, useEffect, useMemo, useCallback, useRef } = React;
       const lucide =
         window.lucideReact || window.LucideReact || window.lucide || {};
 
@@ -126,11 +126,18 @@
         const [logsError, setLogsError] = useState("");
         const [showAllLogs, setShowAllLogs] = useState(false);
         const [isSavingLog, setIsSavingLog] = useState(false);
+        const [showTransporters, setShowTransporters] = useState(false);
+        const resultsRef = useRef(null);
 
         const currentYear = new Date().getFullYear();
-        const BORDEREAU_REGEX = new RegExp(`^23/${currentYear}/([1-9]\\d{0,3})$`);
+        const BORDEREAU_REGEX = new RegExp(`^23/${currentYear}/(?!0000)\\d{4}$`);
 
         const userIdentifier = session?.user?.id || session?.user?.email || null;
+        const userDisplayName =
+          session?.user?.user_metadata?.username ||
+          session?.user?.user_metadata?.full_name ||
+          session?.user?.email ||
+          "Utilisateur";
 
         const fetchLogs = useCallback(async () => {
           if (!userIdentifier) {
@@ -406,8 +413,15 @@
           return logs.slice(0, 5);
         }, [logs, showAllLogs]);
 
+        const scrollToResults = () => {
+          if (resultsRef.current) {
+            resultsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        };
+
         const handleSearch = async () => {
           setHasSearched(true);
+          setTimeout(scrollToResults, 150);
 
           if (!userIdentifier) {
             return;
@@ -433,6 +447,7 @@
             const { error } = await supabase.from("logs").insert([
               {
                 identifiant: userIdentifier,
+                utilisateur: userDisplayName,
                 bordereau,
                 departements: formattedDepartments || null,
                 attributs:
@@ -564,19 +579,19 @@
                   <h1 className="text-3xl font-bold text-gray-800">
                     Optimiseur de Transporteur
                   </h1>
-                  <p className="text-sm text-gray-500">
-                    Données en temps réel depuis Supabase
-                  </p>
                 </div>
               </div>
-              <button
-                onClick={async () => {
-                  await supabase.auth.signOut();
-                }}
-                className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-              >
-                <LogoutIcon size={18} /> Déconnexion
-              </button>
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-700">{userDisplayName}</span>
+                <button
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                  }}
+                  className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+                >
+                  <LogoutIcon size={18} /> Déconnexion
+                </button>
+              </div>
             </div>
 
             {/* ======= FORMULAIRE CRITÈRES ======= */}
@@ -725,51 +740,67 @@
 
             {/* ======= SECTION TRANSPORTEURS ======= */}
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-              <h2 className="text-xl font-bold text-gray-800 mb-4">Transporteurs</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-800">Tarif transporteur</h2>
+                <button
+                  onClick={() => setShowTransporters((prev) => !prev)}
+                  className="text-sm text-indigo-600 hover:text-indigo-800"
+                >
+                  {showTransporters ? "Voir moins" : "Voir plus"}
+                </button>
+              </div>
 
-              {selectedDepts.length === 0 ? (
-                <p className="text-gray-500">Sélectionnez un ou plusieurs départements pour afficher les tarifs.</p>
-              ) : (
-                <div className="space-y-4">
-                  {transporters.map((t) => (
-                    <div key={t.id} className="border rounded p-4">
-                      <div className="flex justify-between mb-2">
-                        <h3 className="font-semibold text-lg">{t.name}</h3>
-                        {t.hasBreakOfCharge && (
-                          <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded">
-                            Rupture de charge : {t.breakOfChargeCost}€
-                          </span>
-                        )}
-                      </div>
-                      <ul className="text-sm text-gray-700">
-                        {selectedDepts.map((deptId) => {
-                          const rate = t.rates.find((r) => r.deptId === deptId);
-                          const dept = departments.find((d) => d.id === deptId);
-                          if (!rate || !dept) return null;
-                          return (
-                            <li key={dept.code}>
-                              <strong>{dept.code} - {dept.name}</strong> :
-                              <span className="ml-2">Baché {formatTruckRate(rate.tarpsCost)}</span> |
-                              <span className="ml-2">Plateau {formatTruckRate(rate.flatbedCost)}</span>
-                            </li>
-                          );
-                        })}
-                      </ul>
+              {showTransporters && (
+                <>
+                  {selectedDepts.length === 0 ? (
+                    <p className="text-gray-500">Sélectionnez un ou plusieurs départements pour afficher les tarifs.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {transporters.map((t) => (
+                        <div key={t.id} className="border rounded p-4">
+                          <div className="flex justify-between mb-2">
+                            <h3 className="font-semibold text-lg">{t.name}</h3>
+                            {t.hasBreakOfCharge && (
+                              <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded">
+                                Rupture de charge : {t.breakOfChargeCost}€
+                              </span>
+                            )}
+                          </div>
+                          <ul className="text-sm text-gray-700">
+                            {selectedDepts.map((deptId) => {
+                              const rate = t.rates.find((r) => r.deptId === deptId);
+                              const dept = departments.find((d) => d.id === deptId);
+                              if (!rate || !dept) return null;
+                              return (
+                                <li key={dept.code}>
+                                  <strong>{dept.code} - {dept.name}</strong> :
+                                  <span className="ml-2">Baché {formatTruckRate(rate.tarpsCost)}</span> |
+                                  <span className="ml-2">Plateau {formatTruckRate(rate.flatbedCost)}</span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               )}
             </div>
 
             {/* ======= RÉSULTATS DU CALCUL ======= */}
             {hasSearched && bestTransporters.length > 0 && (
-              <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+              <div
+                ref={resultsRef}
+                id="resultats"
+                className="bg-white rounded-xl shadow-lg p-6 mb-8"
+              >
                 <div className="flex items-center gap-3 mb-6">
                   <CalculatorIcon className="text-green-600" size={28} />
                   <h2 className="text-2xl font-bold text-gray-800">Résultats du Calcul</h2>
                 </div>
 
-                {bestTransporters.map((result, index) => (
+                {bestTransporters.slice(0, 3).map((result, index) => (
                   <div
                     key={result.transporter.id}
                     className={`p-6 rounded-lg border-2 mb-4 ${
@@ -806,7 +837,11 @@
               </div>
             )}
             {hasSearched && selectedDepts.length > 0 && bestTransporters.length === 0 && (
-              <div className="bg-white rounded-xl shadow-lg p-6 mb-8 text-gray-600">
+              <div
+                ref={resultsRef}
+                id="resultats"
+                className="bg-white rounded-xl shadow-lg p-6 mb-8 text-gray-600"
+              >
                 <h2 className="text-xl font-semibold mb-2">Tarifs indisponibles</h2>
                 <p>
                   Aucun transporteur ne propose actuellement de tarifs complets pour tous les
