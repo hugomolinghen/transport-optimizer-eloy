@@ -588,16 +588,6 @@
           }
         };
 
-        /********************************************
-         *  INTERFACE UTILISATEUR
-         ********************************************/
-        if (authLoading)
-          return (
-            <div className="flex items-center justify-center h-screen text-gray-600">
-              <p>Vérification de la session Supabase...</p>
-            </div>
-          );
-
         const handleLogin = useCallback(
           async (event) => {
             event?.preventDefault();
@@ -617,6 +607,16 @@
           },
           [email, password]
         );
+
+        /********************************************
+         *  INTERFACE UTILISATEUR
+         ********************************************/
+        if (authLoading)
+          return (
+            <div className="flex items-center justify-center h-screen text-gray-600">
+              <p>Vérification de la session Supabase...</p>
+            </div>
+          );
 
         if (!session)
           return (
