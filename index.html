@@ -130,7 +130,7 @@
         const resultsRef = useRef(null);
 
         const currentYear = new Date().getFullYear();
-        const BORDEREAU_REGEX = new RegExp(`^23/${currentYear}/([1-9]\\d{0,3})$`);
+        const BORDEREAU_REGEX = new RegExp(`^23/${currentYear}/(?!0000)\\d{4}$`);
 
         const userIdentifier = session?.user?.id || session?.user?.email || null;
         const userDisplayName =
