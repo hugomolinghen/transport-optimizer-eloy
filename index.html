@@ -542,16 +542,27 @@
               return;
             }
 
-            event.preventDefault();
-            setSelectedDepts((prev) => {
-              if (prev.includes(soleDepartment.id)) {
-                return prev;
-              }
+            const inputElement = event.currentTarget;
+            const alreadySelected = selectedDepts.includes(soleDepartment.id);
 
-              return [...prev, soleDepartment.id];
-            });
+            event.preventDefault();
+            if (!alreadySelected) {
+              setSelectedDepts((prev) => {
+                if (prev.includes(soleDepartment.id)) {
+                  return prev;
+                }
+
+                return [...prev, soleDepartment.id];
+              });
+            }
+
+            if (inputElement && typeof inputElement.select === "function") {
+              requestAnimationFrame(() => {
+                inputElement.select();
+              });
+            }
           },
-          [filteredDepartments]
+          [filteredDepartments, selectedDepts]
         );
 
         const handleValidate = async () => {
