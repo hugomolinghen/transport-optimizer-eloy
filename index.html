@@ -598,6 +598,26 @@
             </div>
           );
 
+        const handleLogin = useCallback(
+          async (event) => {
+            event?.preventDefault();
+            if (!email || !password) return;
+
+            try {
+              setAuthError("");
+              const { error } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+              });
+              if (error) throw error;
+            } catch (err) {
+              console.error("❌ Erreur de connexion :", err);
+              setAuthError(err.message || "Impossible de se connecter.");
+            }
+          },
+          [email, password]
+        );
+
         if (!session)
           return (
             <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 p-6">
@@ -616,7 +636,7 @@
                     {authError}
                   </div>
                 )}
-                <div className="space-y-4">
+                <form className="space-y-4" onSubmit={handleLogin}>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Email
@@ -642,25 +662,13 @@
                     />
                   </div>
                   <button
-                    onClick={async () => {
-                      try {
-                        setAuthError("");
-                        const { error } = await supabase.auth.signInWithPassword({
-                          email,
-                          password,
-                        });
-                        if (error) throw error;
-                      } catch (err) {
-                        console.error("❌ Erreur de connexion :", err);
-                        setAuthError(err.message || "Impossible de se connecter.");
-                      }
-                    }}
+                    type="submit"
                     className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
                     disabled={!email || !password}
                   >
                     Se connecter
                   </button>
-                </div>
+                </form>
               </div>
             </div>
           );
