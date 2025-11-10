@@ -133,6 +133,7 @@
         const [validationError, setValidationError] = useState("");
         const [validationMessage, setValidationMessage] = useState("");
         const resultsRef = useRef(null);
+        const [departmentSearch, setDepartmentSearch] = useState("");
 
         const currentYear = new Date().getFullYear();
         const BORDEREAU_REGEX = new RegExp(`^23/${currentYear}/(?!0000)\\d{4}$`);
@@ -331,6 +332,20 @@
             .filter(Boolean);
         }, [selectedDepts, departments]);
 
+        const filteredDepartments = useMemo(() => {
+          const query = departmentSearch.trim().toLowerCase();
+
+          if (!query) {
+            return departments;
+          }
+
+          return departments.filter((dept) => {
+            const codeMatch = dept.code?.toLowerCase().includes(query);
+            const nameMatch = dept.name?.toLowerCase().includes(query);
+            return codeMatch || nameMatch;
+          });
+        }, [departmentSearch, departments]);
+
         const bestTransporters = useMemo(() => {
           if (!selectedDepts.length || !truckType || !transporters.length) return [];
 
@@ -472,6 +487,19 @@
           return null;
         };
 
+        const formatDifferenceValue = (difference) => {
+          if (difference === null || difference === undefined) {
+            return null;
+          }
+
+          const numericDifference = Number(difference);
+          if (!Number.isFinite(numericDifference)) {
+            return null;
+          }
+
+          return numericDifference;
+        };
+
         const visibleLogs = useMemo(() => {
           if (showAllLogs) {
             return logs;
@@ -498,6 +526,33 @@
             setIsSearching(false);
           }, 150);
         };
+
+        const handleDepartmentSearchKeyDown = useCallback(
+          (event) => {
+            if (event.key !== "Enter") {
+              return;
+            }
+
+            if (filteredDepartments.length !== 1) {
+              return;
+            }
+
+            const soleDepartment = filteredDepartments[0];
+            if (!soleDepartment) {
+              return;
+            }
+
+            event.preventDefault();
+            setSelectedDepts((prev) => {
+              if (prev.includes(soleDepartment.id)) {
+                return prev;
+              }
+
+              return [...prev, soleDepartment.id];
+            });
+          },
+          [filteredDepartments]
+        );
 
         const handleValidate = async () => {
           if (!bestTransporters.length) {
@@ -528,6 +583,14 @@
 
             const rankedChoices = bestTransporters.slice(0, 3);
             const selectedChoice = rankedChoices[selectedResultIndex];
+            const bestChoice = bestTransporters[0] || null;
+            const differenceValue =
+              bestChoice && selectedChoice
+                ? Math.max(
+                    0,
+                    selectedChoice.totalCost - bestChoice.totalCost
+                  )
+                : null;
 
             if (!selectedChoice) {
               setValidationError("Le transporteur sélectionné est invalide.");
@@ -565,6 +628,10 @@
               cout_3: rankedChoices[2]
                 ? Number(rankedChoices[2].totalCost.toFixed(2))
                 : null,
+              difference:
+                differenceValue !== null
+                  ? Number(differenceValue.toFixed(2))
+                  : null,
               raison_1: reasons[0] ? reasons[0].trim() || null : null,
               raison_2: reasons[1] ? reasons[1].trim() || null : null,
               raison_3: reasons[2] ? reasons[2].trim() || null : null,
@@ -795,33 +862,55 @@
                   </button>
                 </div>
 
+                <div className="relative mb-4">
+                  <SearchIcon
+                    size={16}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                  />
+                  <input
+                    type="text"
+                    value={departmentSearch}
+                    onChange={(event) => setDepartmentSearch(event.target.value)}
+                    onKeyDown={handleDepartmentSearchKeyDown}
+                    placeholder="Rechercher un département (ex: 75)"
+                    className="w-full border border-gray-300 rounded-lg py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                    autoComplete="off"
+                  />
+                </div>
+
                 <div className="max-h-80 overflow-y-auto space-y-2">
-                  {departments.map((dept) => (
-                    <div
-                      key={dept.id}
-                      className="flex items-center justify-between bg-gray-50 p-2 rounded hover:bg-gray-100"
-                    >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={selectedDepts.includes(dept.id)}
-                          onChange={(e) =>
-                            setSelectedDepts((prev) =>
-                              e.target.checked
-                                ? [...prev, dept.id]
-                                : prev.filter((id) => id !== dept.id)
-                            )
-                          }
-                          className="text-indigo-600"
-                        />
-                        <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">
-                          {dept.code}
-                        </span>
-                        <span>{dept.name}</span>
+                  {filteredDepartments.length === 0 ? (
+                    <p className="text-sm text-gray-500">
+                      Aucun département ne correspond à la recherche.
+                    </p>
+                  ) : (
+                    filteredDepartments.map((dept) => (
+                      <div
+                        key={dept.id}
+                        className="flex items-center justify-between bg-gray-50 p-2 rounded hover:bg-gray-100"
+                      >
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedDepts.includes(dept.id)}
+                            onChange={(e) =>
+                              setSelectedDepts((prev) =>
+                                e.target.checked
+                                  ? [...prev, dept.id]
+                                  : prev.filter((id) => id !== dept.id)
+                              )
+                            }
+                            className="text-indigo-600"
+                          />
+                          <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">
+                            {dept.code}
+                          </span>
+                          <span>{dept.name}</span>
+                        </div>
+                        <span className="text-sm text-gray-500">{dept.km} km</span>
                       </div>
-                      <span className="text-sm text-gray-500">{dept.km} km</span>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -1099,6 +1188,19 @@
                           <span className="font-medium text-gray-700">{log.bordereau}</span>
                           <span>{formatLogDate(log.date_recherche)}</span>
                         </div>
+                        {(() => {
+                          const differenceValue = formatDifferenceValue(
+                            log.difference
+                          );
+                          if (differenceValue === null) {
+                            return null;
+                          }
+                          return (
+                            <p className="text-sm text-gray-700">
+                              <span className="font-semibold">Écart :</span> {differenceValue.toFixed(2)}€
+                            </p>
+                          );
+                        })()}
                         {log.departements && (
                           <p className="text-sm text-gray-700">
                             <span className="font-semibold">Départements :</span> {log.departements}
