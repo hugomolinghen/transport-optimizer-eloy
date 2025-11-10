@@ -63,6 +63,13 @@
       const RouteIcon = lucide.Route || lucide.Map || createFallbackIcon("🗺️");
       const UnlockIcon = lucide.LockOpen || lucide.LogIn || createFallbackIcon("🔐");
       const LogoutIcon = lucide.LogOut || createFallbackIcon("🚪");
+      const SettingsIcon = lucide.Settings || createFallbackIcon("⚙️");
+      const UploadIcon = lucide.Upload || createFallbackIcon("📤");
+      const SaveIcon = lucide.Save || createFallbackIcon("💾");
+      const RefreshIcon = lucide.RefreshCcw || createFallbackIcon("🔁");
+      const UsersIcon = lucide.Users || createFallbackIcon("🧑‍🤝‍🧑");
+
+      const ADMIN_EMAILS = ["admin@eloy", "admin@eloy.com"]; 
 
       const parseTariff = (rawCost) => {
         if (rawCost === null || rawCost === undefined) {
@@ -105,6 +112,841 @@
       }
 
       /********************************************
+       *  INTERFACE ADMINISTRATEUR
+       ********************************************/
+      function AdminDashboard({ session, onExit, onDataUpdated }) {
+        const [activeTab, setActiveTab] = useState("tarifs");
+        const [adminLoading, setAdminLoading] = useState(true);
+        const [adminError, setAdminError] = useState("");
+        const [adminMessage, setAdminMessage] = useState("");
+        const [csvError, setCsvError] = useState("");
+        const [isSavingTariffs, setIsSavingTariffs] = useState(false);
+        const [isSavingTransporters, setIsSavingTransporters] = useState(false);
+        const [isImporting, setIsImporting] = useState(false);
+        const [tariffRows, setTariffRows] = useState([]);
+        const [transporterRows, setTransporterRows] = useState([]);
+        const [rawDepartments, setRawDepartments] = useState([]);
+        const [rawTransporters, setRawTransporters] = useState([]);
+        const fileInputRef = useRef(null);
+
+        const normalizeNumber = (value) => {
+          if (value === null || value === undefined || value === "") return null;
+          const normalized = String(value).replace(",", ".").trim();
+          if (!normalized) return null;
+          const parsed = Number(normalized);
+          if (!Number.isFinite(parsed)) {
+            throw new Error(`La valeur "${value}" n'est pas un nombre valide.`);
+          }
+          return parsed;
+        };
+
+        const loadAdminData = useCallback(async () => {
+          try {
+            setAdminLoading(true);
+            setAdminError("");
+            setAdminMessage("");
+            setCsvError("");
+
+            const [departmentsResult, transportersResult, tariffsResult] = await Promise.all([
+              supabase.from("departements").select("*"),
+              supabase.from("transporteurs").select("*"),
+              supabase.from("tarifs").select("*"),
+            ]);
+
+            if (departmentsResult.error) throw departmentsResult.error;
+            if (transportersResult.error) throw transportersResult.error;
+            if (tariffsResult.error) throw tariffsResult.error;
+
+            const departments = (departmentsResult.data || []).map((dept) => ({
+              id: dept.id,
+              code:
+                dept.code ||
+                dept.departement_code ||
+                dept.department_code ||
+                dept.code_insee ||
+                "",
+              name: dept.name || dept.nom || dept.libelle || "",
+              km: dept.km ?? dept.distance ?? null,
+            }));
+
+            const transporters = (transportersResult.data || []).map((transporter) => ({
+              id: transporter.id,
+              name: transporter.nom || transporter.name || transporter.libelle || "",
+              hasBreakOfCharge: Boolean(transporter.break_of_charge),
+              breakOfChargeCost:
+                transporter.break_of_charge_cost !== undefined &&
+                transporter.break_of_charge_cost !== null
+                  ? Number(transporter.break_of_charge_cost)
+                  : 0,
+            }));
+
+            const transporterMap = new Map(
+              transporters.map((item) => [item.id, item])
+            );
+            const departmentMap = new Map(
+              departments.map((item) => [item.id, item])
+            );
+
+            const tariffs = (tariffsResult.data || [])
+              .map((row) => {
+                const transporteurId =
+                  row.transporteur_id ?? row.transporter_id ?? row.transporteur ?? null;
+                const departementId =
+                  row.departement_id ?? row.department_id ?? row.departement ?? null;
+                if (!transporteurId || !departementId) {
+                  return null;
+                }
+                const transporter = transporterMap.get(transporteurId);
+                const department = departmentMap.get(departementId);
+
+                return {
+                  transporteurId,
+                  departementId,
+                  transporterName:
+                    transporter?.name || `Transporteur #${transporteurId}`,
+                  departmentCode:
+                    department?.code || `Dept #${departementId}`,
+                  tarpsCost:
+                    row.prix_bache ??
+                    row.prix_tarps ??
+                    row.tarif_bache ??
+                    row.tarif_bache_ht ??
+                    "",
+                  flatbedCost:
+                    row.prix_plateau ??
+                    row.prix_flatbed ??
+                    row.tarif_plateau ??
+                    row.tarif_plateau_ht ??
+                    "",
+                };
+              })
+              .filter(Boolean)
+              .sort((a, b) => {
+                if (a.transporterName === b.transporterName) {
+                  return a.departmentCode.localeCompare(b.departmentCode, "fr", {
+                    numeric: true,
+                  });
+                }
+                return a.transporterName.localeCompare(b.transporterName, "fr", {
+                  numeric: true,
+                });
+              });
+
+            setRawDepartments(departments);
+            setRawTransporters(transporters);
+            setTariffRows(tariffs);
+            setTransporterRows(
+              transporters.map((item) => ({
+                id: item.id,
+                name: item.name,
+                hasBreakOfCharge: item.hasBreakOfCharge,
+                breakOfChargeCost: String(
+                  item.breakOfChargeCost ?? ""
+                ),
+              }))
+            );
+          } catch (err) {
+            console.error("❌ Erreur chargement admin :", err);
+            setAdminError(
+              err.message ||
+                "Impossible de charger les données d'administration."
+            );
+          } finally {
+            setAdminLoading(false);
+          }
+        }, [session?.user?.id]);
+
+        useEffect(() => {
+          loadAdminData();
+        }, [loadAdminData]);
+
+        const transporterMap = useMemo(
+          () => new Map(rawTransporters.map((item) => [item.id, item])),
+          [rawTransporters]
+        );
+
+        const departmentMap = useMemo(
+          () => new Map(rawDepartments.map((item) => [item.id, item])),
+          [rawDepartments]
+        );
+
+        const handleTariffFieldChange = (index, field, value) => {
+          setTariffRows((previous) => {
+            const next = [...previous];
+            next[index] = { ...next[index], [field]: value };
+            return next;
+          });
+        };
+
+        const handleTransporterFieldChange = (index, field, value) => {
+          setTransporterRows((previous) => {
+            const next = [...previous];
+            next[index] = { ...next[index], [field]: value };
+            return next;
+          });
+        };
+
+        const handleAddTransporter = () => {
+          setTransporterRows((previous) => [
+            ...previous,
+            {
+              id: null,
+              name: "",
+              hasBreakOfCharge: false,
+              breakOfChargeCost: "",
+            },
+          ]);
+        };
+
+        const handleSaveTariffs = async () => {
+          try {
+            setIsSavingTariffs(true);
+            setAdminError("");
+            setAdminMessage("");
+
+            const payload = tariffRows.map((row) => {
+              let tarpsCost = null;
+              let flatbedCost = null;
+
+              if (row.tarpsCost !== "" && row.tarpsCost !== null) {
+                tarpsCost = normalizeNumber(row.tarpsCost);
+              }
+
+              if (row.flatbedCost !== "" && row.flatbedCost !== null) {
+                flatbedCost = normalizeNumber(row.flatbedCost);
+              }
+
+              return {
+                transporteur_id: row.transporteurId,
+                departement_id: row.departementId,
+                prix_bache: tarpsCost,
+                prix_plateau: flatbedCost,
+              };
+            });
+
+            const { error } = await supabase
+              .from("tarifs")
+              .upsert(payload, {
+                onConflict: "transporteur_id,departement_id",
+              });
+
+            if (error) throw error;
+
+            setAdminMessage("Tarifs sauvegardés avec succès.");
+            await loadAdminData();
+            onDataUpdated?.();
+          } catch (err) {
+            console.error("❌ Erreur sauvegarde tarifs :", err);
+            setAdminError(
+              err.message || "Impossible d'enregistrer les tarifs."
+            );
+          } finally {
+            setIsSavingTariffs(false);
+          }
+        };
+
+        const handleSaveTransporters = async () => {
+          try {
+            setIsSavingTransporters(true);
+            setAdminError("");
+            setAdminMessage("");
+
+            const payload = transporterRows.map((row) => {
+              if (!row.name || !row.name.trim()) {
+                throw new Error(
+                  "Chaque transporteur doit avoir un nom avant la sauvegarde."
+                );
+              }
+
+              let breakCost = 0;
+              if (row.hasBreakOfCharge) {
+                const parsed = normalizeNumber(row.breakOfChargeCost || 0);
+                breakCost = parsed !== null ? parsed : 0;
+              }
+
+              return {
+                id: row.id || undefined,
+                nom: row.name.trim(),
+                break_of_charge: row.hasBreakOfCharge,
+                break_of_charge_cost: breakCost,
+              };
+            });
+
+            const { error } = await supabase.from("transporteurs").upsert(payload);
+
+            if (error) throw error;
+
+            setAdminMessage("Transporteurs sauvegardés avec succès.");
+            await loadAdminData();
+            onDataUpdated?.();
+          } catch (err) {
+            console.error("❌ Erreur sauvegarde transporteurs :", err);
+            setAdminError(
+              err.message ||
+                "Impossible d'enregistrer les transporteurs pour le moment."
+            );
+          } finally {
+            setIsSavingTransporters(false);
+          }
+        };
+
+        const handleCsvButtonClick = () => {
+          fileInputRef.current?.click();
+        };
+
+        const handleCsvFileChange = (event) => {
+          const file = event.target.files?.[0];
+          if (!file) return;
+
+          setIsImporting(true);
+          setCsvError("");
+          setAdminMessage("");
+
+          const reader = new FileReader();
+          reader.onload = () => {
+            try {
+              const rawText = String(reader.result || "");
+              const lines = rawText
+                .split(/\r?\n/)
+                .map((line) => line.trim())
+                .filter((line) => line.length > 0);
+
+              if (!lines.length) {
+                throw new Error("Le fichier CSV est vide.");
+              }
+
+              const delimiter = lines[0].includes(";") ? ";" : ",";
+              const headers = lines[0]
+                .split(delimiter)
+                .map((header) => header.trim().toLowerCase());
+
+              const getIndex = (...keys) =>
+                headers.findIndex((header) => keys.includes(header));
+
+              const transporterIdIndex = getIndex(
+                "transporteur_id",
+                "transporter_id",
+                "transporteur"
+              );
+              const transporterNameIndex = getIndex(
+                "transporteur_nom",
+                "transporter_name",
+                "nom"
+              );
+              const departmentIdIndex = getIndex(
+                "departement_id",
+                "department_id",
+                "departement"
+              );
+              const departmentCodeIndex = getIndex(
+                "departement_code",
+                "department_code",
+                "code"
+              );
+              const tarpsIndex = getIndex(
+                "prix_bache",
+                "tarif_bache",
+                "prix_tarps"
+              );
+              const flatbedIndex = getIndex(
+                "prix_plateau",
+                "tarif_plateau",
+                "prix_flatbed"
+              );
+
+              if (
+                transporterIdIndex === -1 &&
+                transporterNameIndex === -1
+              ) {
+                throw new Error(
+                  "Le fichier CSV doit contenir une colonne 'transporteur_id' ou 'transporteur_nom'."
+                );
+              }
+
+              if (departmentIdIndex === -1 && departmentCodeIndex === -1) {
+                throw new Error(
+                  "Le fichier CSV doit contenir une colonne 'departement_id' ou 'departement_code'."
+                );
+              }
+
+              const transporterNameToId = new Map(
+                rawTransporters
+                  .filter((item) => item.name)
+                  .map((item) => [item.name.toLowerCase(), item.id])
+              );
+              const departmentCodeToId = new Map(
+                rawDepartments
+                  .filter((item) => item.code)
+                  .map((item) => [item.code.toLowerCase(), item.id])
+              );
+
+              const importedRows = [];
+              const skipped = [];
+
+              for (let lineIndex = 1; lineIndex < lines.length; lineIndex += 1) {
+                const cells = lines[lineIndex]
+                  .split(delimiter)
+                  .map((cell) => cell.trim());
+
+                if (cells.length === 1 && !cells[0]) continue;
+
+                let transporteurId = null;
+                if (transporterIdIndex !== -1) {
+                  const cell = cells[transporterIdIndex];
+                  const parsed = Number(cell);
+                  transporteurId = Number.isFinite(parsed) ? parsed : null;
+                }
+
+                if (!transporteurId && transporterNameIndex !== -1) {
+                  const nameCell = cells[transporterNameIndex]?.toLowerCase();
+                  transporteurId = nameCell
+                    ? transporterNameToId.get(nameCell) || null
+                    : null;
+                }
+
+                if (!transporteurId) {
+                  skipped.push({
+                    line: lineIndex + 1,
+                    reason: "Transporteur introuvable",
+                  });
+                  continue;
+                }
+
+                let departementId = null;
+                if (departmentIdIndex !== -1) {
+                  const cell = cells[departmentIdIndex];
+                  const parsed = Number(cell);
+                  departementId = Number.isFinite(parsed) ? parsed : null;
+                }
+
+                if (!departementId && departmentCodeIndex !== -1) {
+                  const codeCell = cells[departmentCodeIndex]?.toLowerCase();
+                  departementId = codeCell
+                    ? departmentCodeToId.get(codeCell) || null
+                    : null;
+                }
+
+                if (!departementId) {
+                  skipped.push({
+                    line: lineIndex + 1,
+                    reason: "Département introuvable",
+                  });
+                  continue;
+                }
+
+                const tarpsValue = tarpsIndex !== -1 ? cells[tarpsIndex] : "";
+                const flatbedValue =
+                  flatbedIndex !== -1 ? cells[flatbedIndex] : "";
+
+                const transporter = transporterMap.get(transporteurId);
+                const department = departmentMap.get(departementId);
+
+                importedRows.push({
+                  transporteurId,
+                  departementId,
+                  transporterName:
+                    transporter?.name || `Transporteur #${transporteurId}`,
+                  departmentCode:
+                    department?.code || `Dept #${departementId}`,
+                  tarpsCost: tarpsValue,
+                  flatbedCost: flatbedValue,
+                });
+              }
+
+              if (!importedRows.length) {
+                throw new Error(
+                  "Aucune ligne valide n'a été trouvée dans le fichier CSV."
+                );
+              }
+
+              setTariffRows((previous) => {
+                const map = new Map(
+                  previous.map((row) => [
+                    `${row.transporteurId}-${row.departementId}`,
+                    row,
+                  ])
+                );
+
+                importedRows.forEach((row) => {
+                  const key = `${row.transporteurId}-${row.departementId}`;
+                  map.set(key, {
+                    ...(map.get(key) || {}),
+                    ...row,
+                  });
+                });
+
+                return Array.from(map.values()).sort((a, b) => {
+                  if (a.transporterName === b.transporterName) {
+                    return a.departmentCode.localeCompare(
+                      b.departmentCode,
+                      "fr",
+                      { numeric: true }
+                    );
+                  }
+                  return a.transporterName.localeCompare(
+                    b.transporterName,
+                    "fr",
+                    { numeric: true }
+                  );
+                });
+              });
+
+              const successMessage = `${importedRows.length} ligne${
+                importedRows.length > 1 ? "s" : ""
+              } importée${importedRows.length > 1 ? "s" : ""}.`;
+              setAdminMessage(successMessage);
+
+              if (skipped.length) {
+                const detail = skipped
+                  .map((item) => `Ligne ${item.line} : ${item.reason}`)
+                  .join(" | ");
+                setCsvError(
+                  `Certaines lignes ont été ignorées lors de l'import : ${detail}.`
+                );
+              }
+            } catch (err) {
+              console.error("❌ Erreur import CSV :", err);
+              setCsvError(err.message || "Import CSV impossible.");
+            } finally {
+              setIsImporting(false);
+              if (fileInputRef.current) {
+                fileInputRef.current.value = "";
+              }
+            }
+          };
+
+          reader.onerror = () => {
+            setCsvError("Impossible de lire le fichier sélectionné.");
+            setIsImporting(false);
+          };
+
+          reader.readAsText(file, "utf-8");
+        };
+
+        const renderTariffTable = () => {
+          if (!tariffRows.length) {
+            return (
+              <p className="text-sm text-gray-500">
+                Aucun tarif n'est actuellement disponible. Importez un CSV ou
+                modifiez les valeurs existantes puis sauvegardez.
+              </p>
+            );
+          }
+
+          return (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Transporteur
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Département
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Prix bâché (€)
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Prix plateau (€)
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {tariffRows.map((row, index) => (
+                    <tr key={`${row.transporteurId}-${row.departementId}`} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 text-gray-700">
+                        <div className="font-medium text-gray-800">
+                          {row.transporterName}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          ID #{row.transporteurId}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-gray-700">
+                        <div className="font-medium text-gray-800">
+                          {row.departmentCode}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          ID #{row.departementId}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={row.tarpsCost ?? ""}
+                          onChange={(event) =>
+                            handleTariffFieldChange(
+                              index,
+                              "tarpsCost",
+                              event.target.value
+                            )
+                          }
+                          className="w-28 border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={row.flatbedCost ?? ""}
+                          onChange={(event) =>
+                            handleTariffFieldChange(
+                              index,
+                              "flatbedCost",
+                              event.target.value
+                            )
+                          }
+                          className="w-28 border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        };
+
+        const renderTransporterTable = () => {
+          if (!transporterRows.length) {
+            return (
+              <p className="text-sm text-gray-500">
+                Aucun transporteur enregistré. Ajoutez-en un nouveau pour
+                commencer.
+              </p>
+            );
+          }
+
+          return (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Nom
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Rupture de charge
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Coût rupture (€)
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {transporterRows.map((row, index) => (
+                    <tr key={row.id ? row.id : `new-${index}`} className="hover:bg-gray-50">
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={row.name}
+                          onChange={(event) =>
+                            handleTransporterFieldChange(
+                              index,
+                              "name",
+                              event.target.value
+                            )
+                          }
+                          className="w-full border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="Nom du transporteur"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(row.hasBreakOfCharge)}
+                            onChange={(event) =>
+                              handleTransporterFieldChange(
+                                index,
+                                "hasBreakOfCharge",
+                                event.target.checked
+                              )
+                            }
+                            className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
+                          />
+                          Oui
+                        </label>
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={row.breakOfChargeCost ?? ""}
+                          onChange={(event) =>
+                            handleTransporterFieldChange(
+                              index,
+                              "breakOfChargeCost",
+                              event.target.value
+                            )
+                          }
+                          disabled={!row.hasBreakOfCharge}
+                          className={`w-32 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                            row.hasBreakOfCharge
+                              ? "bg-white"
+                              : "bg-gray-100 text-gray-400"
+                          }`}
+                          placeholder="0"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        };
+
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 p-6">
+            <div className="max-w-7xl mx-auto space-y-6">
+              <div className="bg-white rounded-xl shadow-lg p-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-center gap-3">
+                  <SettingsIcon className="text-indigo-600" size={32} />
+                  <div>
+                    <h1 className="text-3xl font-bold text-gray-800">
+                      Administration des tarifs
+                    </h1>
+                    <p className="text-sm text-gray-500">
+                      {session?.user?.email || "Administrateur"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap justify-end gap-3">
+                  <button
+                    onClick={() => loadAdminData()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+                    disabled={adminLoading}
+                  >
+                    <RefreshIcon size={16} /> Actualiser
+                  </button>
+                  <button
+                    onClick={onExit}
+                    className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                  >
+                    <RouteIcon size={16} /> Aller à l'outil
+                  </button>
+                </div>
+              </div>
+
+              {adminError && (
+                <div className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-lg">
+                  {adminError}
+                </div>
+              )}
+
+              {adminMessage && (
+                <div className="bg-emerald-50 text-emerald-700 text-sm px-4 py-3 rounded-lg">
+                  {adminMessage}
+                </div>
+              )}
+
+              {csvError && (
+                <div className="bg-amber-50 text-amber-700 text-sm px-4 py-3 rounded-lg">
+                  {csvError}
+                </div>
+              )}
+
+              <div className="bg-white rounded-xl shadow-lg">
+                <div className="border-b border-gray-200 flex">
+                  <button
+                    onClick={() => setActiveTab("tarifs")}
+                    className={`flex-1 px-4 py-3 text-sm font-medium ${
+                      activeTab === "tarifs"
+                        ? "text-indigo-600 border-b-2 border-indigo-600"
+                        : "text-gray-500 hover:text-indigo-600"
+                    }`}
+                  >
+                    Tarifs
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("transporteurs")}
+                    className={`flex-1 px-4 py-3 text-sm font-medium ${
+                      activeTab === "transporteurs"
+                        ? "text-indigo-600 border-b-2 border-indigo-600"
+                        : "text-gray-500 hover:text-indigo-600"
+                    }`}
+                  >
+                    Transporteurs
+                  </button>
+                </div>
+
+                <div className="p-6 space-y-4">
+                  {adminLoading ? (
+                    <div className="flex justify-center py-12 text-gray-500">
+                      Chargement des données d'administration...
+                    </div>
+                  ) : activeTab === "tarifs" ? (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <span className="text-sm text-gray-500">
+                          {tariffRows.length} ligne{tariffRows.length > 1 ? "s" : ""}
+                          {" "}de tarifs
+                        </span>
+                        <div className="flex flex-wrap gap-3">
+                          <button
+                            onClick={handleCsvButtonClick}
+                            className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+                            disabled={isImporting}
+                          >
+                            <UploadIcon size={16} /> Import CSV
+                          </button>
+                          <button
+                            onClick={handleSaveTariffs}
+                            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                            disabled={isSavingTariffs}
+                          >
+                            <SaveIcon size={16} /> Sauvegarder
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Colonnes attendues pour l'import CSV : transporteur_id ou
+                        transporteur_nom, departement_id ou departement_code,
+                        prix_bache, prix_plateau.
+                      </p>
+                      {renderTariffTable()}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <span className="text-sm text-gray-500">
+                          {transporterRows.length} transporteur{transporterRows.length > 1 ? "s" : ""}
+                        </span>
+                        <div className="flex flex-wrap gap-3">
+                          <button
+                            onClick={handleAddTransporter}
+                            className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50"
+                          >
+                            <UsersIcon size={16} /> Ajouter un transporteur
+                          </button>
+                          <button
+                            onClick={handleSaveTransporters}
+                            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                            disabled={isSavingTransporters}
+                          >
+                            <SaveIcon size={16} /> Sauvegarder
+                          </button>
+                        </div>
+                      </div>
+                      {renderTransporterTable()}
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".csv"
+              className="hidden"
+              onChange={handleCsvFileChange}
+            />
+          </div>
+        );
+      }
+
+      /********************************************
        *  COMPOSANT PRINCIPAL
        ********************************************/
       function TransportOptimizer() {
@@ -134,6 +976,13 @@
         const [validationMessage, setValidationMessage] = useState("");
         const resultsRef = useRef(null);
         const [departmentSearch, setDepartmentSearch] = useState("");
+        const [dataReloadFlag, setDataReloadFlag] = useState(0);
+        const [adminPanelActive, setAdminPanelActive] = useState(false);
+        const [adminAutoOpened, setAdminAutoOpened] = useState(false);
+
+        const handleDataRefresh = useCallback(() => {
+          setDataReloadFlag((value) => value + 1);
+        }, []);
 
         const currentYear = new Date().getFullYear();
         const BORDEREAU_REGEX = new RegExp(`^23/${currentYear}/(?!0000)\\d{4}$`);
@@ -144,6 +993,8 @@
           session?.user?.user_metadata?.full_name ||
           session?.user?.email ||
           "Utilisateur";
+        const userEmail = session?.user?.email?.toLowerCase() || "";
+        const isAdmin = ADMIN_EMAILS.includes(userEmail);
 
         const fetchLogs = useCallback(async () => {
           if (!userIdentifier) {
@@ -183,6 +1034,26 @@
 
           fetchLogs();
         }, [userIdentifier, fetchLogs]);
+
+        useEffect(() => {
+          if (!session) {
+            setAdminPanelActive(false);
+            setAdminAutoOpened(false);
+          }
+        }, [session]);
+
+        useEffect(() => {
+          if (!isAdmin) {
+            setAdminPanelActive(false);
+            setAdminAutoOpened(false);
+            return;
+          }
+
+          if (!adminAutoOpened) {
+            setAdminPanelActive(true);
+            setAdminAutoOpened(true);
+          }
+        }, [isAdmin, adminAutoOpened]);
 
         /********************************************
          *  CHARGEMENT DES DONNÉES SUPABASE
@@ -316,7 +1187,7 @@
           return () => {
             isActive = false;
           };
-        }, [session]);
+        }, [session, dataReloadFlag]);
 
         /********************************************
          *  CALCUL DU MEILLEUR TRANSPORTEUR
@@ -751,6 +1622,15 @@
             </div>
           );
 
+        if (isAdmin && adminPanelActive)
+          return (
+            <AdminDashboard
+              session={session}
+              onExit={() => setAdminPanelActive(false)}
+              onDataUpdated={handleDataRefresh}
+            />
+          );
+
         if (loading)
           return (
             <div className="flex items-center justify-center h-screen text-gray-600">
@@ -782,6 +1662,14 @@
               </div>
               <div className="flex items-center gap-4">
                 <span className="text-sm text-gray-700">{userDisplayName}</span>
+                {isAdmin && (
+                  <button
+                    onClick={() => setAdminPanelActive(true)}
+                    className="flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800"
+                  >
+                    <SettingsIcon size={18} /> Mode admin
+                  </button>
+                )}
                 <button
                   onClick={async () => {
                     await supabase.auth.signOut();
