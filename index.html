@@ -150,7 +150,7 @@
             const [departmentsResult, transportersResult, tariffsResult] = await Promise.all([
               supabase.from("departements").select("*"),
               supabase.from("transporteurs").select("*"),
-              supabase.from("tarifs").select("*"),
+              supabase.from("tarifs_transporteurs").select("*"),
             ]);
 
             if (departmentsResult.error) throw departmentsResult.error;
@@ -169,16 +169,28 @@
               km: dept.km ?? dept.distance ?? null,
             }));
 
-            const transporters = (transportersResult.data || []).map((transporter) => ({
-              id: transporter.id,
-              name: transporter.nom || transporter.name || transporter.libelle || "",
-              hasBreakOfCharge: Boolean(transporter.break_of_charge),
-              breakOfChargeCost:
-                transporter.break_of_charge_cost !== undefined &&
-                transporter.break_of_charge_cost !== null
-                  ? Number(transporter.break_of_charge_cost)
-                  : 0,
-            }));
+            const transporters = (transportersResult.data || []).map((transporter) => {
+              const breakOfChargeRaw =
+                transporter.break_of_charge ??
+                transporter.has_break_of_charge ??
+                transporter.hasBreakOfCharge ??
+                false;
+              const breakOfChargeCostRaw =
+                transporter.break_of_charge_cost ??
+                transporter.breakOfChargeCost ??
+                transporter.break_cost ??
+                null;
+
+              return {
+                id: transporter.id,
+                name: transporter.nom || transporter.name || transporter.libelle || "",
+                hasBreakOfCharge: Boolean(breakOfChargeRaw),
+                breakOfChargeCost:
+                  breakOfChargeCostRaw !== undefined && breakOfChargeCostRaw !== null
+                    ? Number(breakOfChargeCostRaw)
+                    : 0,
+              };
+            });
 
             const transporterMap = new Map(
               transporters.map((item) => [item.id, item])
@@ -325,7 +337,7 @@
             });
 
             const { error } = await supabase
-              .from("tarifs")
+              .from("tarifs_transporteurs")
               .upsert(payload, {
                 onConflict: "transporteur_id,departement_id",
               });
