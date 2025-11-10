@@ -39,7 +39,7 @@
       /********************************************
        *  COMPOSANT PRINCIPAL REACT
        ********************************************/
-      const { useState, useEffect, useMemo } = React;
+      const { useState, useEffect, useMemo, useCallback } = React;
       const lucide =
         window.lucideReact || window.LucideReact || window.lucide || {};
 
@@ -121,9 +121,55 @@
         const [authError, setAuthError] = useState("");
         const [email, setEmail] = useState("");
         const [password, setPassword] = useState("");
+        const [logs, setLogs] = useState([]);
+        const [logsLoading, setLogsLoading] = useState(false);
+        const [logsError, setLogsError] = useState("");
+        const [showAllLogs, setShowAllLogs] = useState(false);
+        const [isSavingLog, setIsSavingLog] = useState(false);
 
         const currentYear = new Date().getFullYear();
         const BORDEREAU_REGEX = new RegExp(`^23/${currentYear}/([1-9]\\d{0,3})$`);
+
+        const userIdentifier = session?.user?.id || session?.user?.email || null;
+
+        const fetchLogs = useCallback(async () => {
+          if (!userIdentifier) {
+            setLogs([]);
+            setLogsError("");
+            return;
+          }
+
+          try {
+            setLogsLoading(true);
+            setLogsError("");
+            const { data, error } = await supabase
+              .from("logs")
+              .select("*")
+              .eq("identifiant", userIdentifier)
+              .order("date_recherche", { ascending: false });
+
+            if (error) throw error;
+
+            setLogs(data || []);
+          } catch (err) {
+            console.error("❌ Erreur récupération logs :", err);
+            setLogsError(err.message || "Impossible de récupérer l'historique.");
+          } finally {
+            setLogsLoading(false);
+          }
+        }, [userIdentifier]);
+
+        useEffect(() => {
+          if (!userIdentifier) {
+            setLogs([]);
+            setLogsError("");
+            setLogsLoading(false);
+            setShowAllLogs(false);
+            return;
+          }
+
+          fetchLogs();
+        }, [userIdentifier, fetchLogs]);
 
         /********************************************
          *  CHARGEMENT DES DONNÉES SUPABASE
@@ -341,6 +387,79 @@
           return `${parsed.value.toFixed(2)}€`;
         };
 
+        const formatLogDate = (value) => {
+          if (!value) return "";
+          try {
+            return new Date(value).toLocaleString("fr-FR", {
+              dateStyle: "short",
+              timeStyle: "short",
+            });
+          } catch (err) {
+            return value;
+          }
+        };
+
+        const visibleLogs = useMemo(() => {
+          if (showAllLogs) {
+            return logs;
+          }
+          return logs.slice(0, 5);
+        }, [logs, showAllLogs]);
+
+        const handleSearch = async () => {
+          setHasSearched(true);
+
+          if (!userIdentifier) {
+            return;
+          }
+
+          try {
+            setIsSavingLog(true);
+
+            const formattedDepartments = optimalRoute
+              .map((dept) => `${dept.code} - ${dept.name}`)
+              .join(", ");
+
+            const topChoices = bestTransporters.slice(0, 3).map(
+              (choice) =>
+                `${choice.transporter.name} (${choice.totalCost.toFixed(2)}€)`
+            );
+
+            const mainResult =
+              bestTransporters.length > 0
+                ? `${bestTransporters[0].transporter.name} (${bestTransporters[0].totalCost.toFixed(2)}€)`
+                : "Aucun transporteur éligible";
+
+            const { error } = await supabase.from("logs").insert([
+              {
+                identifiant: userIdentifier,
+                bordereau,
+                departements: formattedDepartments || null,
+                attributs:
+                  truckType === "bache"
+                    ? "Camion baché"
+                    : truckType === "plateau"
+                    ? "Camion plateau"
+                    : null,
+                resultat: mainResult,
+                choix_1: topChoices[0] || null,
+                choix_2: topChoices[1] || null,
+                choix_3: topChoices[2] || null,
+              },
+            ]);
+
+            if (error) {
+              throw error;
+            }
+
+            await fetchLogs();
+          } catch (err) {
+            console.error("❌ Erreur lors de l'enregistrement du log :", err);
+          } finally {
+            setIsSavingLog(false);
+          }
+        };
+
         /********************************************
          *  INTERFACE UTILISATEUR
          ********************************************/
@@ -507,11 +626,18 @@
                 </div>
 
                 <button
-                  onClick={() => setHasSearched(true)}
-                  className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 flex items-center justify-center gap-2"
-                  disabled={!BORDEREAU_REGEX.test(bordereau) || !truckType || !selectedDepts.length}
+                  onClick={handleSearch}
+                  className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-60"
+                  disabled=
+                    {(!BORDEREAU_REGEX.test(bordereau) || !truckType || !selectedDepts.length || isSavingLog)}
                 >
-                  <SearchIcon size={18} /> Rechercher
+                  {isSavingLog ? (
+                    "Enregistrement..."
+                  ) : (
+                    <>
+                      <SearchIcon size={18} /> Rechercher
+                    </>
+                  )}
                 </button>
               </div>
 
@@ -689,6 +815,70 @@
                 </p>
               </div>
             )}
+
+            <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-800">Historique des recherches</h2>
+                {logsLoading && <span className="text-sm text-gray-500">Chargement...</span>}
+              </div>
+
+              {logsError && (
+                <div className="bg-red-50 text-red-600 text-sm p-3 rounded mb-4">{logsError}</div>
+              )}
+
+              {!logsLoading && logs.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  Aucune recherche enregistrée pour le moment. Lancez une recherche pour voir les
+                  derniers résultats ici.
+                </p>
+              ) : (
+                <>
+                  <ul className="space-y-4">
+                    {visibleLogs.map((log) => (
+                      <li key={log.id} className="border border-gray-200 rounded-lg p-4">
+                        <div className="flex items-center justify-between text-sm text-gray-500 mb-2">
+                          <span className="font-medium text-gray-700">{log.bordereau}</span>
+                          <span>{formatLogDate(log.date_recherche)}</span>
+                        </div>
+                        {log.departements && (
+                          <p className="text-sm text-gray-700">
+                            <span className="font-semibold">Départements :</span> {log.departements}
+                          </p>
+                        )}
+                        {log.attributs && (
+                          <p className="text-sm text-gray-700">
+                            <span className="font-semibold">Type :</span> {log.attributs}
+                          </p>
+                        )}
+                        {log.resultat && (
+                          <p className="text-sm text-gray-700">
+                            <span className="font-semibold">Résultat :</span> {log.resultat}
+                          </p>
+                        )}
+                        {(log.choix_1 || log.choix_2 || log.choix_3) && (
+                          <ul className="mt-2 space-y-1 text-sm text-gray-600">
+                            {log.choix_1 && <li>1️⃣ {log.choix_1}</li>}
+                            {log.choix_2 && <li>2️⃣ {log.choix_2}</li>}
+                            {log.choix_3 && <li>3️⃣ {log.choix_3}</li>}
+                          </ul>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+
+                  {logs.length > 5 && (
+                    <div className="mt-4">
+                      <button
+                        onClick={() => setShowAllLogs((prev) => !prev)}
+                        className="text-sm text-indigo-600 hover:text-indigo-800"
+                      >
+                        {showAllLogs ? "Voir moins" : "Voir plus"}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         );
       }
