@@ -125,8 +125,13 @@
         const [logsLoading, setLogsLoading] = useState(false);
         const [logsError, setLogsError] = useState("");
         const [showAllLogs, setShowAllLogs] = useState(false);
+        const [isSearching, setIsSearching] = useState(false);
         const [isSavingLog, setIsSavingLog] = useState(false);
         const [showTransporters, setShowTransporters] = useState(false);
+        const [selectedResultIndex, setSelectedResultIndex] = useState(null);
+        const [reasons, setReasons] = useState({});
+        const [validationError, setValidationError] = useState("");
+        const [validationMessage, setValidationMessage] = useState("");
         const resultsRef = useRef(null);
 
         const currentYear = new Date().getFullYear();
@@ -386,6 +391,41 @@
           return rankedResults.sort((a, b) => a.totalCost - b.totalCost);
         }, [optimalRoute, transporters, truckType]);
 
+        useEffect(() => {
+          const topLength = Math.min(3, bestTransporters.length);
+
+          if (
+            selectedResultIndex !== null &&
+            selectedResultIndex >= topLength
+          ) {
+            setSelectedResultIndex(null);
+          }
+
+          setReasons((prev) => {
+            let changed = false;
+            const next = {};
+
+            Object.keys(prev).forEach((key) => {
+              const idx = Number(key);
+              if (!Number.isNaN(idx) && idx < topLength && prev[key]) {
+                next[key] = prev[key];
+              } else if (!changed) {
+                changed = true;
+              }
+            });
+
+            if (!changed) {
+              const prevKeys = Object.keys(prev);
+              const nextKeys = Object.keys(next);
+              if (prevKeys.length !== nextKeys.length) {
+                changed = true;
+              }
+            }
+
+            return changed ? next : prev;
+          });
+        }, [bestTransporters, selectedResultIndex]);
+
         const formatTruckRate = (rawCost) => {
           const parsed = parseTariff(rawCost);
           if (!parsed.available) {
@@ -406,6 +446,26 @@
           }
         };
 
+        const formatChoiceDisplay = (choiceName, rawCost) => {
+          const trimmedName = typeof choiceName === "string" ? choiceName.trim() : "";
+          const numericCost = Number(rawCost);
+          const hasNumericCost = Number.isFinite(numericCost);
+
+          if (trimmedName && hasNumericCost) {
+            return `${trimmedName} (${numericCost.toFixed(2)}€)`;
+          }
+
+          if (trimmedName) {
+            return trimmedName;
+          }
+
+          if (hasNumericCost) {
+            return `${numericCost.toFixed(2)}€`;
+          }
+
+          return null;
+        };
+
         const visibleLogs = useMemo(() => {
           if (showAllLogs) {
             return logs;
@@ -419,57 +479,104 @@
           }
         };
 
-        const handleSearch = async () => {
+        const handleSearch = () => {
           setHasSearched(true);
-          setTimeout(scrollToResults, 150);
+          setSelectedResultIndex(null);
+          setReasons({});
+          setValidationError("");
+          setValidationMessage("");
+          setIsSearching(true);
+
+          setTimeout(() => {
+            scrollToResults();
+            setIsSearching(false);
+          }, 150);
+        };
+
+        const handleValidate = async () => {
+          if (!bestTransporters.length) {
+            setValidationError("Aucun résultat à valider.");
+            return;
+          }
+
+          if (selectedResultIndex === null) {
+            setValidationError("Veuillez sélectionner un transporteur.");
+            return;
+          }
 
           if (!userIdentifier) {
+            setValidationError(
+              "Vous devez être connecté pour enregistrer le résultat."
+            );
             return;
           }
 
           try {
+            setValidationError("");
+            setValidationMessage("");
             setIsSavingLog(true);
 
             const formattedDepartments = optimalRoute
               .map((dept) => `${dept.code} - ${dept.name}`)
               .join(", ");
 
-            const topChoices = bestTransporters.slice(0, 3).map(
-              (choice) =>
-                `${choice.transporter.name} (${choice.totalCost.toFixed(2)}€)`
-            );
+            const rankedChoices = bestTransporters.slice(0, 3);
+            const selectedChoice = rankedChoices[selectedResultIndex];
 
-            const mainResult =
-              bestTransporters.length > 0
-                ? `${bestTransporters[0].transporter.name} (${bestTransporters[0].totalCost.toFixed(2)}€)`
-                : "Aucun transporteur éligible";
+            if (!selectedChoice) {
+              setValidationError("Le transporteur sélectionné est invalide.");
+              setIsSavingLog(false);
+              return;
+            }
 
-            const { error } = await supabase.from("logs").insert([
-              {
-                identifiant: userIdentifier,
-                utilisateur: userDisplayName,
-                bordereau,
-                departements: formattedDepartments || null,
-                attributs:
-                  truckType === "bache"
-                    ? "Camion baché"
-                    : truckType === "plateau"
-                    ? "Camion plateau"
-                    : null,
-                resultat: mainResult,
-                choix_1: topChoices[0] || null,
-                choix_2: topChoices[1] || null,
-                choix_3: topChoices[2] || null,
-              },
-            ]);
+            const payload = {
+              identifiant: userIdentifier,
+              utilisateur: userDisplayName,
+              bordereau,
+              departements: formattedDepartments || null,
+              attributs:
+                truckType === "bache"
+                  ? "Camion baché"
+                  : truckType === "plateau"
+                  ? "Camion plateau"
+                  : null,
+              resultat: selectedChoice.transporter.name,
+              choix_1: rankedChoices[0]
+                ? rankedChoices[0].transporter.name
+                : null,
+              choix_2: rankedChoices[1]
+                ? rankedChoices[1].transporter.name
+                : null,
+              choix_3: rankedChoices[2]
+                ? rankedChoices[2].transporter.name
+                : null,
+              cout_1: rankedChoices[0]
+                ? Number(rankedChoices[0].totalCost.toFixed(2))
+                : null,
+              cout_2: rankedChoices[1]
+                ? Number(rankedChoices[1].totalCost.toFixed(2))
+                : null,
+              cout_3: rankedChoices[2]
+                ? Number(rankedChoices[2].totalCost.toFixed(2))
+                : null,
+              raison_1: reasons[0] ? reasons[0].trim() || null : null,
+              raison_2: reasons[1] ? reasons[1].trim() || null : null,
+              raison_3: reasons[2] ? reasons[2].trim() || null : null,
+            };
+
+            const { error } = await supabase.from("logs").insert([payload]);
 
             if (error) {
               throw error;
             }
 
+            setValidationMessage("Résultat enregistré avec succès.");
             await fetchLogs();
           } catch (err) {
             console.error("❌ Erreur lors de l'enregistrement du log :", err);
+            setValidationError(
+              err.message || "Impossible d'enregistrer le résultat."
+            );
           } finally {
             setIsSavingLog(false);
           }
@@ -644,10 +751,14 @@
                   onClick={handleSearch}
                   className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-60"
                   disabled=
-                    {(!BORDEREAU_REGEX.test(bordereau) || !truckType || !selectedDepts.length || isSavingLog)}
+                    {(!BORDEREAU_REGEX.test(bordereau) ||
+                      !truckType ||
+                      !selectedDepts.length ||
+                      isSearching ||
+                      isSavingLog)}
                 >
-                  {isSavingLog ? (
-                    "Enregistrement..."
+                  {isSearching ? (
+                    "Recherche..."
                   ) : (
                     <>
                       <SearchIcon size={18} /> Rechercher
@@ -795,45 +906,126 @@
                 id="resultats"
                 className="bg-white rounded-xl shadow-lg p-6 mb-8"
               >
-                <div className="flex items-center gap-3 mb-6">
-                  <CalculatorIcon className="text-green-600" size={28} />
-                  <h2 className="text-2xl font-bold text-gray-800">Résultats du Calcul</h2>
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <CalculatorIcon className="text-green-600" size={28} />
+                    <h2 className="text-2xl font-bold text-gray-800">Résultats du Calcul</h2>
+                  </div>
+                  <button
+                    onClick={handleValidate}
+                    className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-green-600 text-white text-sm font-semibold hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                    disabled={
+                      isSavingLog ||
+                      selectedResultIndex === null ||
+                      !bestTransporters.length
+                    }
+                  >
+                    {isSavingLog ? "Validation..." : "Valider"}
+                  </button>
                 </div>
 
-                {bestTransporters.slice(0, 3).map((result, index) => (
-                  <div
-                    key={result.transporter.id}
-                    className={`p-6 rounded-lg border-2 mb-4 ${
-                      index === 0
-                        ? "bg-green-50 border-green-500"
-                        : "bg-gray-50 border-gray-200"
-                    }`}
-                  >
-                    <div className="flex justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        {index === 0 && (
-                          <span className="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">
-                            ⭐ MEILLEUR CHOIX
-                          </span>
-                        )}
-                        <h3 className="text-xl font-bold text-gray-800">
-                          {result.transporter.name}
-                        </h3>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-3xl font-bold text-indigo-600">
-                          {result.totalCost.toFixed(2)}€
-                        </div>
-                        <div className="text-sm text-gray-500">Coût total</div>
-                      </div>
-                    </div>
-                    <div className="space-y-1 text-sm text-gray-700">
-                      {result.details.map((d, i) => (
-                        <p key={i}>• {d}</p>
-                      ))}
-                    </div>
+                {validationError && (
+                  <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {validationError}
                   </div>
-                ))}
+                )}
+
+                {validationMessage && (
+                  <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+                    {validationMessage}
+                  </div>
+                )}
+
+                {bestTransporters.slice(0, 3).map((result, index) => {
+                  const isSelected = selectedResultIndex === index;
+                  const reasonValue = reasons[index] || "";
+
+                  return (
+                    <div
+                      key={result.transporter.id}
+                      className={`p-6 rounded-lg border-2 mb-4 transition-colors ${
+                        isSelected
+                          ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200"
+                          : index === 0
+                          ? "bg-green-50 border-green-500"
+                          : "bg-gray-50 border-gray-200"
+                      }`}
+                    >
+                      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                        <div className="flex-1">
+                          <div className="flex justify-between mb-3">
+                            <div className="flex items-center gap-3">
+                              {index === 0 && !isSelected && (
+                                <span className="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">
+                                  ⭐ MEILLEUR CHOIX
+                                </span>
+                              )}
+                              {isSelected && (
+                                <span className="bg-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-full">
+                                  ✅ SÉLECTIONNÉ
+                                </span>
+                              )}
+                              <h3 className="text-xl font-bold text-gray-800">
+                                {result.transporter.name}
+                              </h3>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-3xl font-bold text-indigo-600">
+                                {result.totalCost.toFixed(2)}€
+                              </div>
+                              <div className="text-sm text-gray-500">Coût total</div>
+                            </div>
+                          </div>
+                          <div className="space-y-1 text-sm text-gray-700">
+                            {result.details.map((d, i) => (
+                              <p key={i}>• {d}</p>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="w-full md:w-64">
+                          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                              checked={isSelected}
+                              onChange={() => {
+                                setSelectedResultIndex((prev) =>
+                                  prev === index ? null : index
+                                );
+                                setValidationError("");
+                                setValidationMessage("");
+                              }}
+                            />
+                            Utiliser ce transporteur
+                          </label>
+                          <label className="block text-xs text-gray-500 mt-4 mb-1">
+                            Raison si non sélectionné
+                          </label>
+                          <textarea
+                            value={reasonValue}
+                            onChange={(e) => {
+                              const { value } = e.target;
+                              setReasons((prev) => {
+                                const next = { ...prev };
+                                if (value) {
+                                  next[index] = value;
+                                } else {
+                                  delete next[index];
+                                }
+                                return next;
+                              });
+                              setValidationError("");
+                              setValidationMessage("");
+                            }}
+                            rows={3}
+                            placeholder="Ex: Coût trop élevé"
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
             {hasSearched && selectedDepts.length > 0 && bestTransporters.length === 0 && (
@@ -890,11 +1082,45 @@
                             <span className="font-semibold">Résultat :</span> {log.resultat}
                           </p>
                         )}
-                        {(log.choix_1 || log.choix_2 || log.choix_3) && (
-                          <ul className="mt-2 space-y-1 text-sm text-gray-600">
-                            {log.choix_1 && <li>1️⃣ {log.choix_1}</li>}
-                            {log.choix_2 && <li>2️⃣ {log.choix_2}</li>}
-                            {log.choix_3 && <li>3️⃣ {log.choix_3}</li>}
+                        {([1, 2, 3].some((idx) =>
+                          log[`choix_${idx}`] ||
+                          log[`cout_${idx}`] ||
+                          log[`raison_${idx}`]
+                        )) && (
+                          <ul className="mt-3 space-y-2 text-sm text-gray-600">
+                            {[1, 2, 3].map((idx) => {
+                              const choice = log[`choix_${idx}`];
+                              const cost = log[`cout_${idx}`];
+                              const reason = log[`raison_${idx}`];
+                              const display =
+                                formatChoiceDisplay(choice, cost) ||
+                                (reason ? "—" : null);
+
+                              if (!display && !reason) {
+                                return null;
+                              }
+
+                              const prefix = idx === 1 ? "1️⃣" : idx === 2 ? "2️⃣" : "3️⃣";
+
+                              return (
+                                <li
+                                  key={idx}
+                                  className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
+                                >
+                                  <div className="font-medium text-gray-700">
+                                    {prefix} {display}
+                                  </div>
+                                  {reason && (
+                                    <p className="mt-1 text-xs text-gray-500">
+                                      <span className="font-semibold text-gray-600">
+                                        Raison :
+                                      </span>{" "}
+                                      {reason}
+                                    </p>
+                                  )}
+                                </li>
+                              );
+                            })}
                           </ul>
                         )}
                       </li>
