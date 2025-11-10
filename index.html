@@ -325,6 +325,12 @@
           [selectedDepts, departments]
         );
 
+        const selectedDepartmentList = useMemo(() => {
+          return selectedDepts
+            .map((id) => departments.find((dept) => dept.id === id))
+            .filter(Boolean);
+        }, [selectedDepts, departments]);
+
         const bestTransporters = useMemo(() => {
           if (!selectedDepts.length || !truckType || !transporters.length) return [];
 
@@ -867,32 +873,50 @@
                     <p className="text-gray-500">Sélectionnez un ou plusieurs départements pour afficher les tarifs.</p>
                   ) : (
                     <div className="space-y-4">
-                      {transporters.map((t) => (
-                        <div key={t.id} className="border rounded p-4">
-                          <div className="flex justify-between mb-2">
-                            <h3 className="font-semibold text-lg">{t.name}</h3>
-                            {t.hasBreakOfCharge && (
-                              <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded">
-                                Rupture de charge : {t.breakOfChargeCost}€
-                              </span>
+                      {selectedDepartmentList.map((dept) => {
+                        const deptTransporters = transporters
+                          .map((t) => {
+                            const rate = t.rates.find((r) => r.deptId === dept.id);
+                            if (!rate) return null;
+                            return { transporter: t, rate };
+                          })
+                          .filter(Boolean);
+
+                        return (
+                          <div key={dept.id} className="border rounded p-4">
+                            <div className="flex flex-col gap-1 mb-3 md:flex-row md:items-center md:justify-between">
+                              <h3 className="font-semibold text-lg text-gray-800">
+                                {dept.code} - {dept.name}
+                              </h3>
+                              <span className="text-sm text-gray-500">{dept.km} km depuis Sprimont</span>
+                            </div>
+                            {deptTransporters.length === 0 ? (
+                              <p className="text-sm text-gray-500">
+                                Aucun tarif disponible pour ce département.
+                              </p>
+                            ) : (
+                              <ul className="text-sm text-gray-700 divide-y divide-gray-200">
+                                {deptTransporters.map(({ transporter, rate }) => (
+                                  <li key={transporter.id} className="py-2 first:pt-0">
+                                    <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                                      <span className="font-semibold text-gray-800">{transporter.name}</span>
+                                      {transporter.hasBreakOfCharge && (
+                                        <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded self-start md:self-auto">
+                                          Rupture de charge : {transporter.breakOfChargeCost}€
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-sm text-gray-600">
+                                      <span className="mr-3">Baché {formatTruckRate(rate.tarpsCost)}</span>
+                                      <span>Plateau {formatTruckRate(rate.flatbedCost)}</span>
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
                             )}
                           </div>
-                          <ul className="text-sm text-gray-700">
-                            {selectedDepts.map((deptId) => {
-                              const rate = t.rates.find((r) => r.deptId === deptId);
-                              const dept = departments.find((d) => d.id === deptId);
-                              if (!rate || !dept) return null;
-                              return (
-                                <li key={dept.code}>
-                                  <strong>{dept.code} - {dept.name}</strong> :
-                                  <span className="ml-2">Baché {formatTruckRate(rate.tarpsCost)}</span> |
-                                  <span className="ml-2">Plateau {formatTruckRate(rate.flatbedCost)}</span>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </>
