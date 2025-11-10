@@ -142,6 +142,22 @@
           return parsed;
         };
 
+        const formatTariffForInput = (value) => {
+          if (value === null || value === undefined || value === "") {
+            return "";
+          }
+
+          try {
+            const parsed = normalizeNumber(value);
+            if (parsed === null) {
+              return "";
+            }
+            return String(parsed);
+          } catch (error) {
+            return String(value).trim();
+          }
+        };
+
         const loadAdminData = useCallback(async () => {
           try {
             setAdminLoading(true);
@@ -213,6 +229,22 @@
                 const transporter = transporterMap.get(transporteurId);
                 const department = departmentMap.get(departementId);
 
+                const rawTarpsCost =
+                  row.prix_bache ??
+                  row.prix_tarps ??
+                  row.tarif_bache ??
+                  row.tarif_bache_ht ??
+                  "";
+                const rawFlatbedCost =
+                  row.prix_plateau ??
+                  row.prix_flatbed ??
+                  row.tarif_plateau ??
+                  row.tarif_plateau_ht ??
+                  "";
+
+                const formattedTarps = formatTariffForInput(rawTarpsCost);
+                const formattedFlatbed = formatTariffForInput(rawFlatbedCost);
+
                 return {
                   transporteurId,
                   departementId,
@@ -221,18 +253,11 @@
                   departmentCode:
                     department?.code || `Dept #${departementId}`,
                   departmentName: department?.name || "",
-                  tarpsCost:
-                    row.prix_bache ??
-                    row.prix_tarps ??
-                    row.tarif_bache ??
-                    row.tarif_bache_ht ??
-                    "",
-                  flatbedCost:
-                    row.prix_plateau ??
-                    row.prix_flatbed ??
-                    row.tarif_plateau ??
-                    row.tarif_plateau_ht ??
-                    "",
+                  tarpsCost: formattedTarps,
+                  flatbedCost: formattedFlatbed,
+                  originalTarpsCost: formattedTarps,
+                  originalFlatbedCost: formattedFlatbed,
+                  hasExistingTariff: true,
                 };
               })
               .filter(Boolean);
@@ -272,6 +297,8 @@
                   departmentName: department.name || "",
                   tarpsCost: existing?.tarpsCost ?? "",
                   flatbedCost: existing?.flatbedCost ?? "",
+                  originalTarpsCost: existing?.originalTarpsCost ?? "",
+                  originalFlatbedCost: existing?.originalFlatbedCost ?? "",
                   hasExistingTariff: Boolean(existing),
                 });
               });
@@ -496,26 +523,23 @@
             const payload = [];
 
             tariffRows.forEach((row) => {
-              const hasTarpsValue =
-                row.tarpsCost !== "" && row.tarpsCost !== null && row.tarpsCost !== undefined;
-              const hasFlatbedValue =
-                row.flatbedCost !== "" &&
-                row.flatbedCost !== null &&
-                row.flatbedCost !== undefined;
+              const tarpsCost = normalizeNumber(row.tarpsCost);
+              const flatbedCost = normalizeNumber(row.flatbedCost);
+              const originalTarps = normalizeNumber(row.originalTarpsCost);
+              const originalFlatbed = normalizeNumber(row.originalFlatbedCost);
+
+              const hasTarpsValue = tarpsCost !== null;
+              const hasFlatbedValue = flatbedCost !== null;
 
               if (!row.hasExistingTariff && !hasTarpsValue && !hasFlatbedValue) {
                 return;
               }
 
-              let tarpsCost = null;
-              let flatbedCost = null;
+              const tarpsChanged = tarpsCost !== originalTarps;
+              const flatbedChanged = flatbedCost !== originalFlatbed;
 
-              if (hasTarpsValue) {
-                tarpsCost = normalizeNumber(row.tarpsCost);
-              }
-
-              if (hasFlatbedValue) {
-                flatbedCost = normalizeNumber(row.flatbedCost);
+              if (!tarpsChanged && !flatbedChanged) {
+                return;
               }
 
               payload.push({
@@ -525,6 +549,11 @@
                 prix_plateau: flatbedCost,
               });
             });
+
+            if (!payload.length) {
+              setAdminMessage("Aucune modification détectée.");
+              return;
+            }
 
             const { error } = await supabase
               .from("tarifs_transporteurs")
@@ -747,9 +776,12 @@
                   continue;
                 }
 
-                const tarpsValue = tarpsIndex !== -1 ? cells[tarpsIndex] : "";
+                const tarpsValue =
+                  tarpsIndex !== -1 ? formatTariffForInput(cells[tarpsIndex]) : "";
                 const flatbedValue =
-                  flatbedIndex !== -1 ? cells[flatbedIndex] : "";
+                  flatbedIndex !== -1
+                    ? formatTariffForInput(cells[flatbedIndex])
+                    : "";
 
                 const transporter = transporterMap.get(transporteurId);
                 const department = departmentMap.get(departementId);
@@ -764,7 +796,6 @@
                   departmentName: department?.name || "",
                   tarpsCost: tarpsValue,
                   flatbedCost: flatbedValue,
-                  hasExistingTariff: true,
                 });
               }
 
@@ -788,8 +819,9 @@
                   map.set(key, {
                     ...previousRow,
                     ...row,
-                    hasExistingTariff:
-                      row.hasExistingTariff || previousRow.hasExistingTariff || false,
+                    hasExistingTariff: previousRow.hasExistingTariff || false,
+                    originalTarpsCost: previousRow.originalTarpsCost ?? "",
+                    originalFlatbedCost: previousRow.originalFlatbedCost ?? "",
                   });
                 });
 
