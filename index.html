@@ -332,17 +332,36 @@
         }, [transporterSourceRows]);
 
         const getNextTransporterId = useCallback(() => {
-          const candidateIds = [
-            ...transporterRows.map((row) => Number(row.id)),
-            ...transporterSourceRows.map((row) => Number(row.id)),
-          ].filter((value) => Number.isFinite(value));
+          const numericIds = transporterRows
+            .map((row) => Number(row.id))
+            .filter((value) => Number.isFinite(value) && value > 0);
 
-          if (!candidateIds.length) {
+          if (!numericIds.length) {
             return 1;
           }
 
-          return Math.max(...candidateIds) + 1;
-        }, [transporterRows, transporterSourceRows]);
+          return Math.max(...numericIds) + 1;
+        }, [transporterRows]);
+
+        const ensureTransporterRowsHaveIds = useCallback(() => {
+          const numericIds = transporterRows
+            .map((row) => Number(row.id))
+            .filter((value) => Number.isFinite(value) && value > 0);
+
+          let nextId = numericIds.length ? Math.max(...numericIds) : 0;
+
+          return transporterRows.map((row) => {
+            const numericId = Number(row.id);
+
+            if (!Number.isFinite(numericId) || numericId <= 0) {
+              nextId += 1;
+              return { ...row, id: nextId };
+            }
+
+            nextId = Math.max(nextId, numericId);
+            return { ...row, id: numericId };
+          });
+        }, [transporterRows]);
 
         const handleTariffFieldChange = (index, field, value) => {
           setTariffRows((previous) => {
@@ -370,10 +389,6 @@
               hasBreakOfCharge: false,
               breakOfChargeCost: "",
             },
-          ]);
-          setTransporterSourceRows((previous) => [
-            ...previous,
-            { id: nextId },
           ]);
         };
 
@@ -430,7 +445,10 @@
             setAdminError("");
             setAdminMessage("");
 
-            const payload = transporterRows.map((row) => {
+            const rowsWithIds = ensureTransporterRowsHaveIds();
+            setTransporterRows(rowsWithIds);
+
+            const payload = rowsWithIds.map((row) => {
               if (!row.name || !row.name.trim()) {
                 throw new Error(
                   "Chaque transporteur doit avoir un nom avant la sauvegarde."
