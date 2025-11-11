@@ -1754,6 +1754,17 @@
                 </div>
               )}
 
+              <div className="bg-blue-50 border border-blue-100 text-sm text-blue-900 px-4 py-3 rounded-lg">
+                <p className="font-medium">Coordonnées des départements</p>
+                <p>
+                  Les colonnes <code className="font-mono">latitude</code> et
+                  <code className="font-mono">longitude</code> sont lues depuis la table
+                  <code className="font-mono">departements</code>. L'éditeur détecte automatiquement les variantes courantes (lat, lon,
+                  departement_lat, etc.). Pensez à renseigner les coordonnées en degrés décimaux pour chaque département afin que le calcul
+                  du détour puisse démarrer immédiatement.
+                </p>
+              </div>
+
               <div className="bg-white rounded-xl shadow-lg">
                 <div className="border-b border-gray-200 flex">
                   <button
@@ -1919,6 +1930,7 @@
         const [validationMessage, setValidationMessage] = useState("");
         const resultsRef = useRef(null);
         const routeCacheRef = useRef(new Map());
+        const geocodingCacheRef = useRef(new Map());
         const [departmentSearch, setDepartmentSearch] = useState("");
         const [dataReloadFlag, setDataReloadFlag] = useState(0);
         const [adminPanelActive, setAdminPanelActive] = useState(false);
@@ -1936,6 +1948,7 @@
           totalDistanceKm: 0,
           segmentDetails: [],
           error: null,
+          statusMessage: null,
         });
 
         const handleDataRefresh = useCallback(() => {
@@ -2372,7 +2385,9 @@
               return cache.get(reverseKey);
             }
 
-            if (!OPENROUTESERVICE_API_KEY) {
+            const sanitizedKey = (OPENROUTESERVICE_API_KEY || "").trim();
+
+            if (!sanitizedKey) {
               throw new Error("Clé API OpenRouteService manquante.");
             }
 
@@ -2382,7 +2397,7 @@
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  Authorization: OPENROUTESERVICE_API_KEY,
+                  Authorization: sanitizedKey,
                 },
                 body: JSON.stringify({
                   coordinates: [
@@ -2420,6 +2435,143 @@
           []
         );
 
+        const geocodeDepartmentCoordinates = useCallback(
+          async (department) => {
+            if (!department) {
+              throw new Error(
+                "Département introuvable. Ajoutez-le ou complétez ses coordonnées dans Supabase."
+              );
+            }
+
+            const toFiniteNumber = (value) =>
+              typeof value === "number" && Number.isFinite(value)
+                ? value
+                : null;
+
+            const existingLat = toFiniteNumber(department.latitude);
+            const existingLon = toFiniteNumber(department.longitude);
+
+            if (Number.isFinite(existingLat) && Number.isFinite(existingLon)) {
+              return { latitude: existingLat, longitude: existingLon };
+            }
+
+            const normalizedCode = normalizeDepartmentCode(department.code);
+            const cacheKey =
+              (normalizedCode && `code:${normalizedCode}`) ||
+              (department.id !== undefined && department.id !== null
+                ? `id:${department.id}`
+                : department.name
+                ? `name:${department.name.toLowerCase()}`
+                : null);
+
+            if (!cacheKey) {
+              throw new Error(
+                "Impossible de déterminer le département à géocoder. Ajoutez ses coordonnées manuellement (colonnes latitude/longitude dans la table departements)."
+              );
+            }
+
+            const cache = geocodingCacheRef.current;
+            const cachedValue = cache.get(cacheKey);
+
+            if (cachedValue?.status === "success") {
+              return cachedValue.coordinates;
+            }
+
+            if (cachedValue?.status === "pending") {
+              return cachedValue.promise;
+            }
+
+            const sanitizedKey = (OPENROUTESERVICE_API_KEY || "").trim();
+
+            if (!sanitizedKey) {
+              throw new Error(
+                "Clé OpenRouteService manquante. Indiquez-la pour permettre le géocodage automatique des départements."
+              );
+            }
+
+            const searchParts = [];
+
+            if (department.name) {
+              searchParts.push(department.name);
+            }
+
+            if (department.code) {
+              searchParts.push(`Département ${department.code}`);
+            }
+
+            searchParts.push("France");
+
+            const searchText = searchParts.filter(Boolean).join(", ");
+
+            const fetchPromise = (async () => {
+              const url = new URL("https://api.openrouteservice.org/geocode/search");
+              url.searchParams.set("api_key", sanitizedKey);
+              url.searchParams.set("text", searchText);
+              url.searchParams.set("size", "1");
+              url.searchParams.set("boundary.country", "FRA");
+
+              const response = await fetch(url.toString());
+
+              if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(
+                  `Erreur de géocodage (${response.status}) : ${
+                    errorText || response.statusText
+                  }`
+                );
+              }
+
+              const json = await response.json();
+              const [lon, lat] = json?.features?.[0]?.geometry?.coordinates || [];
+
+              if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+                throw new Error(
+                  "Réponse de géocodage invalide. Renseignez les coordonnées manuellement dans l'onglet Admin."
+                );
+              }
+
+              return { latitude: lat, longitude: lon };
+            })();
+
+            cache.set(cacheKey, { status: "pending", promise: fetchPromise });
+
+            try {
+              const coordinates = await fetchPromise;
+
+              cache.set(cacheKey, { status: "success", coordinates });
+
+              setDepartments((previous) =>
+                previous.map((item) => {
+                  const itemNormalizedCode = normalizeDepartmentCode(item.code);
+
+                  if (
+                    (itemNormalizedCode && normalizedCode && itemNormalizedCode === normalizedCode) ||
+                    (item.id !== undefined &&
+                      item.id !== null &&
+                      department.id !== undefined &&
+                      department.id !== null &&
+                      item.id === department.id)
+                  ) {
+                    return {
+                      ...item,
+                      latitude: coordinates.latitude,
+                      longitude: coordinates.longitude,
+                    };
+                  }
+
+                  return item;
+                })
+              );
+
+              return coordinates;
+            } catch (error) {
+              cache.set(cacheKey, { status: "error", error });
+              throw error;
+            }
+          },
+          [setDepartments]
+        );
+
         useEffect(() => {
           if (optimalRoute.length < 2) {
             setRouteMetrics({
@@ -2427,6 +2579,7 @@
               totalDistanceKm: 0,
               segmentDetails: [],
               error: null,
+              statusMessage: null,
             });
             return;
           }
@@ -2446,37 +2599,60 @@
             return null;
           };
 
-          const missingCoordinateDept = optimalRoute.find(
-            (dept) =>
-              !Number.isFinite(parseNumeric(dept?.latitude)) ||
-              !Number.isFinite(parseNumeric(dept?.longitude))
-          );
-
-          if (missingCoordinateDept) {
-            setRouteMetrics({
-              loading: false,
-              totalDistanceKm: 0,
-              segmentDetails: [],
-              error: `Coordonnées manquantes pour ${
-                missingCoordinateDept.code ||
-                missingCoordinateDept.name ||
-                "un département"
-              }`,
-            });
-            return;
-          }
+          const hasValidCoordinates = (dept) => {
+            const lat = parseNumeric(dept?.latitude);
+            const lon = parseNumeric(dept?.longitude);
+            return Number.isFinite(lat) && Number.isFinite(lon);
+          };
 
           let isActive = true;
           const abortController = new AbortController();
 
-          setRouteMetrics({
-            loading: true,
-            totalDistanceKm: 0,
-            segmentDetails: [],
-            error: null,
-          });
+          const ensureRouteMetrics = async () => {
+            for (const dept of optimalRoute) {
+              if (!hasValidCoordinates(dept)) {
+                setRouteMetrics({
+                  loading: true,
+                  totalDistanceKm: 0,
+                  segmentDetails: [],
+                  error: null,
+                  statusMessage: `Recherche des coordonnées pour ${
+                    dept.name || dept.code || "le département"
+                  }...`,
+                });
 
-          (async () => {
+                try {
+                  await geocodeDepartmentCoordinates(dept);
+                } catch (geocodeError) {
+                  if (!isActive) {
+                    return;
+                  }
+
+                  const baseMessage =
+                    geocodeError.message ||
+                    "Impossible de récupérer automatiquement les coordonnées de ce département.";
+
+                  setRouteMetrics({
+                    loading: false,
+                    totalDistanceKm: 0,
+                    segmentDetails: [],
+                    error: `${baseMessage} Ajoutez-les dans Supabase (table "departements", colonnes latitude et longitude).`,
+                    statusMessage: null,
+                  });
+                }
+
+                return;
+              }
+            }
+
+            setRouteMetrics({
+              loading: true,
+              totalDistanceKm: 0,
+              segmentDetails: [],
+              error: null,
+              statusMessage: "Calcul du détour en cours via OpenRouteService...",
+            });
+
             try {
               const segments = [];
               let totalDistanceKm = 0;
@@ -2512,6 +2688,7 @@
                 totalDistanceKm,
                 segmentDetails: segments,
                 error: null,
+                statusMessage: null,
               });
             } catch (err) {
               if (!isActive || err.name === "AbortError") {
@@ -2525,15 +2702,22 @@
                 error:
                   err.message ||
                   "Impossible de calculer le détour via OpenRouteService.",
+                statusMessage: null,
               });
             }
-          })();
+          };
+
+          ensureRouteMetrics();
 
           return () => {
             isActive = false;
             abortController.abort();
           };
-        }, [optimalRoute, fetchSegmentDistance]);
+        }, [
+          optimalRoute,
+          fetchSegmentDistance,
+          geocodeDepartmentCoordinates,
+        ]);
 
         const filteredDepartments = useMemo(() => {
           const query = departmentSearch.trim().toLowerCase();
@@ -2606,7 +2790,10 @@
 
             if (hasMultipleDepartments) {
               if (routeMetrics.loading) {
-                details.push("Calcul du détour en cours via OpenRouteService...");
+                details.push(
+                  routeMetrics.statusMessage ||
+                    "Calcul du détour en cours via OpenRouteService..."
+                );
               } else if (routeMetrics.error) {
                 details.push(`Détour indisponible : ${routeMetrics.error}`);
               } else {
@@ -2650,7 +2837,8 @@
                 }
               } else if (routeMetrics.loading && perKmCost > 0) {
                 details.push(
-                  "Calcul du détour en cours pour appliquer les frais kilométriques..."
+                  routeMetrics.statusMessage ||
+                    "Calcul du détour en cours pour appliquer les frais kilométriques..."
                 );
               } else if (routeMetrics.error && perKmCost > 0) {
                 details.push(
@@ -3473,7 +3661,10 @@
                   {optimalRoute.length > 1 && (
                     <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
                       {routeMetrics.loading ? (
-                        <p>Calcul du détour en cours via OpenRouteService...</p>
+                        <p>
+                          {routeMetrics.statusMessage ||
+                            "Calcul du détour en cours via OpenRouteService..."}
+                        </p>
                       ) : routeMetrics.error ? (
                         <p>Impossible de calculer le détour : {routeMetrics.error}</p>
                       ) : (
