@@ -1536,12 +1536,13 @@
         const [adminPanelActive, setAdminPanelActive] = useState(false);
         const [adminAutoOpened, setAdminAutoOpened] = useState(false);
         const [isRegistering, setIsRegistering] = useState(false);
-        const [registerEmail, setRegisterEmail] = useState("");
         const [registerUsername, setRegisterUsername] = useState("");
         const [registerPassword, setRegisterPassword] = useState("");
         const [registerError, setRegisterError] = useState("");
         const [registerMessage, setRegisterMessage] = useState("");
         const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+        const [isLoginPasswordVisible, setIsLoginPasswordVisible] = useState(false);
+        const [isRegisterPasswordVisible, setIsRegisterPasswordVisible] = useState(false);
 
         const handleDataRefresh = useCallback(() => {
           setDataReloadFlag((value) => value + 1);
@@ -2147,15 +2148,7 @@
             setRegisterError("");
             setRegisterMessage("");
 
-            const trimmedEmail = registerEmail.trim();
             const trimmedUsername = registerUsername.trim();
-
-            if (!trimmedEmail || !trimmedEmail.includes("@")) {
-              setRegisterError(
-                "Merci d'indiquer une adresse email factice contenant le caractère @."
-              );
-              return;
-            }
 
             if (!trimmedUsername) {
               setRegisterError(
@@ -2195,7 +2188,6 @@
                   data: {
                     username: trimmedUsername,
                     normalized_username: normalizedUsername,
-                    fake_email: trimmedEmail,
                     auth_email: authEmail,
                   },
                 },
@@ -2213,9 +2205,10 @@
               );
               setEmail(trimmedUsername);
               setPassword(passwordValue);
-              setRegisterEmail("");
               setRegisterUsername("");
               setRegisterPassword("");
+              setIsRegisterPasswordVisible(false);
+              setIsLoginPasswordVisible(false);
             } catch (err) {
               console.error("❌ Erreur lors de la création du compte :", err);
               const message = String(err?.message || "");
@@ -2235,7 +2228,7 @@
               setIsCreatingAccount(false);
             }
           },
-          [registerEmail, registerPassword, registerUsername]
+          [registerPassword, registerUsername]
         );
 
         /********************************************
@@ -2260,7 +2253,7 @@
                     </h1>
                     <p className="text-sm text-gray-500">
                       {isRegistering
-                        ? "Renseignez un email factice, un nom d'utilisateur (utilisé pour la connexion) et un mot de passe."
+                        ? "Choisissez un nom d'utilisateur (utilisé pour la connexion) et un mot de passe."
                         : "Connectez-vous avec votre nom d'utilisateur et votre mot de passe pour accéder aux données transporteurs."}
                     </p>
                   </div>
@@ -2281,19 +2274,6 @@
                     <form className="space-y-4" onSubmit={handleSignUp}>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Adresse email factice
-                        </label>
-                        <input
-                          type="email"
-                          value={registerEmail}
-                          onChange={(e) => setRegisterEmail(e.target.value)}
-                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
-                          placeholder="votre@adresse-factice.com"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
                           Nom d'utilisateur
                         </label>
                         <input
@@ -2309,14 +2289,30 @@
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Mot de passe
                         </label>
-                        <input
-                          type="password"
-                          value={registerPassword}
-                          onChange={(e) => setRegisterPassword(e.target.value)}
-                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
-                          placeholder="••••••••"
-                          required
-                        />
+                        <div className="relative">
+                          <input
+                            type={isRegisterPasswordVisible ? "text" : "password"}
+                            value={registerPassword}
+                            onChange={(e) => setRegisterPassword(e.target.value)}
+                            className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500 pr-12"
+                            placeholder="••••••••"
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setIsRegisterPasswordVisible((visible) => !visible)
+                            }
+                            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                            aria-label={
+                              isRegisterPasswordVisible
+                                ? "Masquer le mot de passe"
+                                : "Afficher le mot de passe"
+                            }
+                          >
+                            {isRegisterPasswordVisible ? "Masquer" : "Afficher"}
+                          </button>
+                        </div>
                       </div>
                       <button
                         type="submit"
@@ -2335,6 +2331,8 @@
                           setIsRegistering(false);
                           setRegisterError("");
                           setRegisterMessage("");
+                          setIsRegisterPasswordVisible(false);
+                          setIsLoginPasswordVisible(false);
                         }}
                       >
                         Se connecter
@@ -2366,14 +2364,30 @@
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Mot de passe
                         </label>
-                        <input
-                          type="password"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
-                          placeholder="••••••••"
-                          required
-                        />
+                        <div className="relative">
+                          <input
+                            type={isLoginPasswordVisible ? "text" : "password"}
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500 pr-12"
+                            placeholder="••••••••"
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setIsLoginPasswordVisible((visible) => !visible)
+                            }
+                            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                            aria-label={
+                              isLoginPasswordVisible
+                                ? "Masquer le mot de passe"
+                                : "Afficher le mot de passe"
+                            }
+                          >
+                            {isLoginPasswordVisible ? "Masquer" : "Afficher"}
+                          </button>
+                        </div>
                       </div>
                       <button
                         type="submit"
@@ -2394,6 +2408,8 @@
                         onClick={() => {
                           setIsRegistering(true);
                           setAuthError("");
+                          setIsRegisterPasswordVisible(false);
+                          setIsLoginPasswordVisible(false);
                         }}
                       >
                         Créer un compte
