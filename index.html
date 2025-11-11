@@ -36,6 +36,10 @@
       // ✅ Initialisation sécurisée du client Supabase
       const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+      const OPENROUTESERVICE_API_KEY =
+        "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6Ijc0ODM1ZTU2MzJkYjQyOGY4ZGRjNmFhMjYxN2ZhYjM3IiwiaCI6Im11cm11cjY0In0=";
+      const OPENROUTESERVICE_PROFILE = "driving-hgv";
+
       /********************************************
        *  COMPOSANT PRINCIPAL REACT
        ********************************************/
@@ -176,8 +180,11 @@
         const [expandedTransporters, setExpandedTransporters] = useState([]);
         const [transporterRows, setTransporterRows] = useState([]);
         const [transporterSourceRows, setTransporterSourceRows] = useState([]);
+        const [departmentRows, setDepartmentRows] = useState([]);
+        const [departmentSourceRows, setDepartmentSourceRows] = useState([]);
         const [rawDepartments, setRawDepartments] = useState([]);
         const [rawTransporters, setRawTransporters] = useState([]);
+        const [isSavingDepartments, setIsSavingDepartments] = useState(false);
         const fileInputRef = useRef(null);
 
         const normalizeNumber = (value) => {
@@ -214,6 +221,42 @@
             setAdminMessage("");
             setCsvError("");
 
+            const readCoordinate = (source, keys) => {
+              if (!source) return null;
+              for (const key of keys) {
+                if (
+                  Object.prototype.hasOwnProperty.call(source, key) &&
+                  source[key] !== null &&
+                  source[key] !== undefined &&
+                  source[key] !== ""
+                ) {
+                  return source[key];
+                }
+              }
+              return null;
+            };
+
+            const parseCoordinateValue = (raw) => {
+              if (raw === null || raw === undefined || raw === "") {
+                return null;
+              }
+
+              if (typeof raw === "number") {
+                return Number.isFinite(raw) ? raw : null;
+              }
+
+              if (typeof raw === "string") {
+                const normalized = raw.replace(",", ".").trim();
+                if (!normalized) {
+                  return null;
+                }
+                const numeric = Number(normalized);
+                return Number.isFinite(numeric) ? numeric : null;
+              }
+
+              return null;
+            };
+
             const [departmentsResult, transportersResult, tariffsResult] = await Promise.all([
               supabase.from("departements").select("*"),
               supabase.from("transporteurs").select("*"),
@@ -224,17 +267,47 @@
             if (transportersResult.error) throw transportersResult.error;
             if (tariffsResult.error) throw tariffsResult.error;
 
-            const departments = (departmentsResult.data || []).map((dept) => ({
-              id: dept.id,
-              code:
-                dept.code ||
-                dept.departement_code ||
-                dept.department_code ||
-                dept.code_insee ||
-                "",
-              name: dept.name || dept.nom || dept.libelle || "",
-              km: dept.km ?? dept.distance ?? null,
-            }));
+            const coordinateKeys = {
+              latitude: [
+                "latitude",
+                "lat",
+                "lat_degre",
+                "lat_deg",
+                "latitude_deg",
+                "departement_lat",
+                "departement_latitude",
+              ],
+              longitude: [
+                "longitude",
+                "lon",
+                "lng",
+                "long",
+                "long_degre",
+                "lon_deg",
+                "longitude_deg",
+                "departement_lon",
+                "departement_longitude",
+              ],
+            };
+
+            const departments = (departmentsResult.data || []).map((dept) => {
+              const latitudeRaw = readCoordinate(dept, coordinateKeys.latitude);
+              const longitudeRaw = readCoordinate(dept, coordinateKeys.longitude);
+
+              return {
+                id: dept.id,
+                code:
+                  dept.code ||
+                  dept.departement_code ||
+                  dept.department_code ||
+                  dept.code_insee ||
+                  "",
+                name: dept.name || dept.nom || dept.libelle || "",
+                km: dept.km ?? dept.distance ?? null,
+                latitude: parseCoordinateValue(latitudeRaw),
+                longitude: parseCoordinateValue(longitudeRaw),
+              };
+            });
 
             const transporters = (transportersResult.data || []).map((transporter) => {
               const breakOfChargeRaw =
@@ -247,6 +320,11 @@
                 transporter.breakOfChargeCost ??
                 transporter.break_cost ??
                 null;
+              const breakOfChargeKmCostRaw =
+                transporter.break_of_charge_km_cost ??
+                transporter.break_km_cost ??
+                transporter.breakOfChargeKmCost ??
+                null;
 
               return {
                 id: transporter.id,
@@ -255,6 +333,10 @@
                 breakOfChargeCost:
                   breakOfChargeCostRaw !== undefined && breakOfChargeCostRaw !== null
                     ? Number(breakOfChargeCostRaw)
+                    : 0,
+                breakOfChargeKmCost:
+                  breakOfChargeKmCostRaw !== undefined && breakOfChargeKmCostRaw !== null
+                    ? Number(breakOfChargeKmCostRaw)
                     : 0,
               };
             });
@@ -452,6 +534,22 @@
             setRawTransporters(transporters);
             setTariffRows(completeTariffs);
             setTransporterSourceRows(transportersResult.data || []);
+            setDepartmentSourceRows(departmentsResult.data || []);
+            setDepartmentRows(
+              departments.map((item) => ({
+                id: item.id,
+                code: item.code,
+                name: item.name,
+                latitude:
+                  item.latitude !== null && item.latitude !== undefined
+                    ? String(item.latitude)
+                    : "",
+                longitude:
+                  item.longitude !== null && item.longitude !== undefined
+                    ? String(item.longitude)
+                    : "",
+              }))
+            );
             setTransporterRows(
               transporters.map((item) => ({
                 id: item.id,
@@ -459,6 +557,9 @@
                 hasBreakOfCharge: item.hasBreakOfCharge,
                 breakOfChargeCost: String(
                   item.breakOfChargeCost ?? ""
+                ),
+                breakOfChargeKmCost: String(
+                  item.breakOfChargeKmCost ?? ""
                 ),
               }))
             );
@@ -551,6 +652,16 @@
           [transporterSourceRows]
         );
 
+        const departmentSourceMap = useMemo(
+          () =>
+            new Map(
+              departmentSourceRows
+                .filter((item) => item && item.id !== undefined && item.id !== null)
+                .map((item) => [item.id, item])
+            ),
+          [departmentSourceRows]
+        );
+
         const transporterColumnNames = useMemo(() => {
           const hasColumn = (key) =>
             transporterSourceRows.some((row) =>
@@ -581,12 +692,66 @@
             ? "breakOfChargeCost"
             : "break_of_charge_cost";
 
+          const breakKmCostKey = hasColumn("break_of_charge_km_cost")
+            ? "break_of_charge_km_cost"
+            : hasColumn("break_km_cost")
+            ? "break_km_cost"
+            : hasColumn("breakOfChargeKmCost")
+            ? "breakOfChargeKmCost"
+            : "break_of_charge_km_cost";
+
           return {
             name: nameKey,
             breakFlag: breakFlagKey,
             breakCost: breakCostKey,
+            breakKmCost: breakKmCostKey,
           };
         }, [transporterSourceRows]);
+
+        const departmentColumnNames = useMemo(() => {
+          const hasColumn = (key) =>
+            departmentSourceRows.some((row) =>
+              row ? Object.prototype.hasOwnProperty.call(row, key) : false
+            );
+
+          const latitudeKey = hasColumn("latitude")
+            ? "latitude"
+            : hasColumn("lat")
+            ? "lat"
+            : hasColumn("lat_degre")
+            ? "lat_degre"
+            : hasColumn("lat_deg")
+            ? "lat_deg"
+            : hasColumn("latitude_deg")
+            ? "latitude_deg"
+            : hasColumn("departement_lat")
+            ? "departement_lat"
+            : hasColumn("departement_latitude")
+            ? "departement_latitude"
+            : "latitude";
+
+          const longitudeKey = hasColumn("longitude")
+            ? "longitude"
+            : hasColumn("lon")
+            ? "lon"
+            : hasColumn("lng")
+            ? "lng"
+            : hasColumn("long")
+            ? "long"
+            : hasColumn("long_degre")
+            ? "long_degre"
+            : hasColumn("lon_deg")
+            ? "lon_deg"
+            : hasColumn("longitude_deg")
+            ? "longitude_deg"
+            : hasColumn("departement_lon")
+            ? "departement_lon"
+            : hasColumn("departement_longitude")
+            ? "departement_longitude"
+            : "longitude";
+
+          return { latitude: latitudeKey, longitude: longitudeKey };
+        }, [departmentSourceRows]);
 
         const getNextTransporterId = useCallback(() => {
           const numericIds = transporterRows
@@ -645,6 +810,14 @@
           });
         };
 
+        const handleDepartmentFieldChange = (index, field, value) => {
+          setDepartmentRows((previous) => {
+            const next = [...previous];
+            next[index] = { ...next[index], [field]: value };
+            return next;
+          });
+        };
+
         const handleAddTransporter = () => {
           const nextId = getNextTransporterId();
           setTransporterRows((previous) => [
@@ -654,6 +827,7 @@
               name: "",
               hasBreakOfCharge: false,
               breakOfChargeCost: "",
+              breakOfChargeKmCost: "",
             },
           ]);
         };
@@ -810,6 +984,78 @@
           }
         };
 
+        const handleSaveDepartments = async () => {
+          try {
+            setIsSavingDepartments(true);
+            setAdminError("");
+            setAdminMessage("");
+
+            if (!departmentRows.length) {
+              setAdminMessage("Aucun département à enregistrer.");
+              return;
+            }
+
+            const payload = departmentRows.map((row) => {
+              if (row.id === undefined || row.id === null) {
+                throw new Error(
+                  "Chaque département doit posséder un identifiant avant la sauvegarde."
+                );
+              }
+
+              const displayLabel =
+                row.code?.trim() || row.name?.trim() || `Département #${row.id}`;
+
+              const parseCoordinate = (value, label) => {
+                if (value === null || value === undefined || value === "") {
+                  return null;
+                }
+
+                const normalized = String(value).replace(",", ".").trim();
+                if (!normalized) {
+                  return null;
+                }
+
+                const numeric = Number(normalized);
+                if (!Number.isFinite(numeric)) {
+                  throw new Error(
+                    `La coordonnée ${label} pour ${displayLabel} n'est pas valide.`
+                  );
+                }
+
+                return numeric;
+              };
+
+              const latitudeValue = parseCoordinate(row.latitude, "latitude");
+              const longitudeValue = parseCoordinate(row.longitude, "longitude");
+
+              const baseRecord =
+                (row.id !== undefined && row.id !== null && departmentSourceMap.get(row.id)) ||
+                null;
+
+              const payloadRow = baseRecord ? { ...baseRecord } : { id: row.id };
+              payloadRow[departmentColumnNames.latitude] = latitudeValue;
+              payloadRow[departmentColumnNames.longitude] = longitudeValue;
+
+              return payloadRow;
+            });
+
+            const { error } = await supabase.from("departements").upsert(payload);
+
+            if (error) throw error;
+
+            setAdminMessage("Coordonnées des départements sauvegardées avec succès.");
+            await loadAdminData();
+            onDataUpdated?.();
+          } catch (err) {
+            console.error("❌ Erreur sauvegarde départements :", err);
+            setAdminError(
+              err.message || "Impossible d'enregistrer les départements."
+            );
+          } finally {
+            setIsSavingDepartments(false);
+          }
+        };
+
         const handleSaveTransporters = async () => {
           try {
             setIsSavingTransporters(true);
@@ -827,9 +1073,13 @@
               }
 
               let breakCost = 0;
+              let breakKmCost = 0;
               if (row.hasBreakOfCharge) {
                 const parsed = normalizeNumber(row.breakOfChargeCost || 0);
                 breakCost = parsed !== null ? parsed : 0;
+
+                const parsedKm = normalizeNumber(row.breakOfChargeKmCost || 0);
+                breakKmCost = parsedKm !== null ? parsedKm : 0;
               }
 
               const baseRecord =
@@ -843,6 +1093,7 @@
               payloadRow[transporterColumnNames.name] = row.name.trim();
               payloadRow[transporterColumnNames.breakFlag] = row.hasBreakOfCharge;
               payloadRow[transporterColumnNames.breakCost] = breakCost;
+              payloadRow[transporterColumnNames.breakKmCost] = breakKmCost;
 
               return payloadRow;
             });
@@ -1266,6 +1517,9 @@
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">
                       Coût rupture (€)
                     </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Frais km rupture (€/km)
+                    </th>
                     <th className="px-3 py-2 text-right font-semibold text-gray-700">
                       Actions
                     </th>
@@ -1326,6 +1580,26 @@
                           placeholder="0"
                         />
                       </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={row.breakOfChargeKmCost ?? ""}
+                          onChange={(event) =>
+                            handleTransporterFieldChange(
+                              index,
+                              "breakOfChargeKmCost",
+                              event.target.value
+                            )
+                          }
+                          disabled={!row.hasBreakOfCharge}
+                          className={`w-32 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                            row.hasBreakOfCharge
+                              ? "bg-white"
+                              : "bg-gray-100 text-gray-400"
+                          }`}
+                          placeholder="0"
+                        />
+                      </td>
                       <td className="px-3 py-2 text-right">
                         <button
                           type="button"
@@ -1342,6 +1616,85 @@
                         >
                           <TrashIcon size={14} /> Supprimer
                         </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        };
+
+        const renderDepartmentTable = () => {
+          if (!departmentRows.length) {
+            return (
+              <p className="text-sm text-gray-500">
+                Aucun département disponible. Ajoutez-les depuis votre base de
+                données ou importez-les.
+              </p>
+            );
+          }
+
+          return (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Code
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Nom
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Latitude
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Longitude
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {departmentRows.map((row, index) => (
+                    <tr
+                      key={row.id !== undefined && row.id !== null ? row.id : `dept-${index}`}
+                      className="hover:bg-gray-50"
+                    >
+                      <td className="px-3 py-2 font-medium text-gray-700">
+                        {row.code || `Dept #${row.id}`}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600">
+                        {row.name || "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={row.latitude ?? ""}
+                          onChange={(event) =>
+                            handleDepartmentFieldChange(
+                              index,
+                              "latitude",
+                              event.target.value
+                            )
+                          }
+                          className="w-32 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="48.8566"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={row.longitude ?? ""}
+                          onChange={(event) =>
+                            handleDepartmentFieldChange(
+                              index,
+                              "longitude",
+                              event.target.value
+                            )
+                          }
+                          className="w-32 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="2.3522"
+                        />
                       </td>
                     </tr>
                   ))}
@@ -1423,6 +1776,16 @@
                   >
                     Transporteurs
                   </button>
+                  <button
+                    onClick={() => setActiveTab("departements")}
+                    className={`flex-1 px-4 py-3 text-sm font-medium ${
+                      activeTab === "departements"
+                        ? "text-indigo-600 border-b-2 border-indigo-600"
+                        : "text-gray-500 hover:text-indigo-600"
+                    }`}
+                  >
+                    Départements
+                  </button>
                 </div>
 
                 <div className="p-6 space-y-4">
@@ -1462,11 +1825,12 @@
                       </p>
                       {renderTariffTable()}
                     </>
-                  ) : (
+                  ) : activeTab === "transporteurs" ? (
                     <>
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <span className="text-sm text-gray-500">
-                          {transporterRows.length} transporteur{transporterRows.length > 1 ? "s" : ""}
+                          {transporterRows.length} transporteur
+                          {transporterRows.length > 1 ? "s" : ""}
                         </span>
                         <div className="flex flex-wrap gap-3">
                           <button
@@ -1485,6 +1849,29 @@
                         </div>
                       </div>
                       {renderTransporterTable()}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <span className="text-sm text-gray-500">
+                          {departmentRows.length} département
+                          {departmentRows.length > 1 ? "s" : ""}
+                        </span>
+                        <div className="flex flex-wrap gap-3">
+                          <button
+                            onClick={handleSaveDepartments}
+                            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                            disabled={isSavingDepartments}
+                          >
+                            <SaveIcon size={16} /> Sauvegarder
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Saisissez la latitude et la longitude de chaque département pour
+                        permettre le calcul des distances réelles via OpenRouteService.
+                      </p>
+                      {renderDepartmentTable()}
                     </>
                   )}
                 </div>
@@ -1531,6 +1918,7 @@
         const [validationError, setValidationError] = useState("");
         const [validationMessage, setValidationMessage] = useState("");
         const resultsRef = useRef(null);
+        const routeCacheRef = useRef(new Map());
         const [departmentSearch, setDepartmentSearch] = useState("");
         const [dataReloadFlag, setDataReloadFlag] = useState(0);
         const [adminPanelActive, setAdminPanelActive] = useState(false);
@@ -1543,6 +1931,12 @@
         const [isCreatingAccount, setIsCreatingAccount] = useState(false);
         const [isLoginPasswordVisible, setIsLoginPasswordVisible] = useState(false);
         const [isRegisterPasswordVisible, setIsRegisterPasswordVisible] = useState(false);
+        const [routeMetrics, setRouteMetrics] = useState({
+          loading: false,
+          totalDistanceKm: 0,
+          segmentDetails: [],
+          error: null,
+        });
 
         const handleDataRefresh = useCallback(() => {
           setDataReloadFlag((value) => value + 1);
@@ -1674,18 +2068,26 @@
               setLoading(true);
               setError("");
 
-              // 🔹 Requête principale : lecture directe de la vue
-              const { data, error } = await supabase
-                .from("v_tarifs_complets")
-                .select(
-                  "transporteur_id, transporteur_nom, break_of_charge, break_of_charge_cost, departement_code, departement_name, km, prix_bache, prix_plateau"
-                );
+              const [tariffsResponse, transportersResponse, departmentsResponse] =
+                await Promise.all([
+                  supabase
+                    .from("v_tarifs_complets")
+                    .select(
+                      "transporteur_id, transporteur_nom, break_of_charge, break_of_charge_cost, departement_code, departement_name, km, prix_bache, prix_plateau"
+                    ),
+                  supabase.from("transporteurs").select("*"),
+                  supabase.from("departements").select("*"),
+                ]);
 
-              if (error) throw error;
+              if (tariffsResponse.error) throw tariffsResponse.error;
+              if (transportersResponse.error) throw transportersResponse.error;
+              if (departmentsResponse.error) throw departmentsResponse.error;
+
+              const data = tariffsResponse.data || [];
 
               console.log("✅ Données récupérées :", data);
 
-              if (!data || data.length === 0) {
+              if (!data.length) {
                 if (!isActive) return;
                 setError("Aucune donnée trouvée dans la vue v_tarifs_complets.");
                 setDepartments([]);
@@ -1693,17 +2095,165 @@
                 return;
               }
 
+              const toFiniteNumber = (value, fallback = 0) => {
+                if (value === null || value === undefined || value === "") {
+                  return fallback;
+                }
+                const numeric = Number(value);
+                return Number.isFinite(numeric) ? numeric : fallback;
+              };
+
+              const readCoordinate = (source, keys) => {
+                if (!source) return null;
+                for (const key of keys) {
+                  if (
+                    Object.prototype.hasOwnProperty.call(source, key) &&
+                    source[key] !== null &&
+                    source[key] !== undefined &&
+                    source[key] !== ""
+                  ) {
+                    return source[key];
+                  }
+                }
+                return null;
+              };
+
+              const parseCoordinateValue = (raw) => {
+                if (raw === null || raw === undefined || raw === "") {
+                  return null;
+                }
+
+                if (typeof raw === "number") {
+                  return Number.isFinite(raw) ? raw : null;
+                }
+
+                if (typeof raw === "string") {
+                  const normalized = raw.replace(",", ".").trim();
+                  if (!normalized) {
+                    return null;
+                  }
+                  const numeric = Number(normalized);
+                  return Number.isFinite(numeric) ? numeric : null;
+                }
+
+                return null;
+              };
+
+              const coordinateKeys = {
+                latitude: [
+                  "departement_lat",
+                  "departement_latitude",
+                  "latitude",
+                  "lat",
+                  "lat_degre",
+                  "lat_deg",
+                  "latitude_deg",
+                ],
+                longitude: [
+                  "departement_lon",
+                  "departement_longitude",
+                  "longitude",
+                  "lon",
+                  "lng",
+                  "long",
+                  "long_degre",
+                  "lon_deg",
+                  "longitude_deg",
+                ],
+              };
+
+              const departmentCoordinateMap = new Map();
+              (departmentsResponse.data || []).forEach((dept) => {
+                const codeValue =
+                  dept.code ||
+                  dept.departement_code ||
+                  dept.department_code ||
+                  dept.code_insee ||
+                  null;
+                const normalizedCode = normalizeDepartmentCode(codeValue);
+                if (!normalizedCode) {
+                  return;
+                }
+
+                const latitudeRaw = readCoordinate(dept, coordinateKeys.latitude);
+                const longitudeRaw = readCoordinate(dept, coordinateKeys.longitude);
+
+                departmentCoordinateMap.set(normalizedCode, {
+                  id: dept.id,
+                  latitude: parseCoordinateValue(latitudeRaw),
+                  longitude: parseCoordinateValue(longitudeRaw),
+                  km: dept.km ?? dept.distance ?? null,
+                  name: dept.name || dept.nom || dept.libelle || "",
+                });
+              });
+
+              const transporterMetaMap = new Map(
+                (transportersResponse.data || []).map((row) => {
+                  const breakOfChargeRaw =
+                    row.break_of_charge ??
+                    row.has_break_of_charge ??
+                    row.hasBreakOfCharge ??
+                    false;
+                  const breakOfChargeCostRaw =
+                    row.break_of_charge_cost ??
+                    row.breakOfChargeCost ??
+                    row.break_cost ??
+                    0;
+                  const breakOfChargeKmCostRaw =
+                    row.break_of_charge_km_cost ??
+                    row.break_km_cost ??
+                    row.breakOfChargeKmCost ??
+                    0;
+
+                  return [
+                    row.id,
+                    {
+                      hasBreakOfCharge: Boolean(breakOfChargeRaw),
+                      breakOfChargeCost: toFiniteNumber(breakOfChargeCostRaw, 0),
+                      breakOfChargeKmCost: toFiniteNumber(breakOfChargeKmCostRaw, 0),
+                    },
+                  ];
+                })
+              );
+
               // 🧩 Construction des départements uniques
               const deptMap = new Map();
-              data.forEach((row, index) => {
-                if (!deptMap.has(row.departement_code)) {
-                  deptMap.set(row.departement_code, {
-                    id: index + 1,
-                    code: row.departement_code,
-                    name: row.departement_name,
-                    km: row.km,
-                  });
+              data.forEach((row) => {
+                if (!row.departement_code || deptMap.has(row.departement_code)) {
+                  return;
                 }
+
+                const normalizedCode = normalizeDepartmentCode(row.departement_code);
+                const coordinateRecord = normalizedCode
+                  ? departmentCoordinateMap.get(normalizedCode)
+                  : null;
+
+                const rowLatitudeRaw = readCoordinate(row, coordinateKeys.latitude);
+                const rowLongitudeRaw = readCoordinate(row, coordinateKeys.longitude);
+
+                const latitude =
+                  parseCoordinateValue(rowLatitudeRaw) ?? coordinateRecord?.latitude ?? null;
+                const longitude =
+                  parseCoordinateValue(rowLongitudeRaw) ?? coordinateRecord?.longitude ?? null;
+
+                const generatedId =
+                  coordinateRecord &&
+                  coordinateRecord.id !== undefined &&
+                  coordinateRecord.id !== null
+                    ? coordinateRecord.id
+                    : deptMap.size + 1;
+
+                deptMap.set(row.departement_code, {
+                  id: generatedId,
+                  code: row.departement_code,
+                  name: row.departement_name,
+                  km:
+                    row.km !== undefined && row.km !== null
+                      ? toFiniteNumber(row.km, null)
+                      : coordinateRecord?.km ?? null,
+                  latitude,
+                  longitude,
+                });
               });
               const deptList = Array.from(deptMap.values()).sort((a, b) =>
                 a.code.localeCompare(b.code, "fr", { numeric: true })
@@ -1713,11 +2263,16 @@
               const transpMap = new Map();
               data.forEach((row) => {
                 if (!transpMap.has(row.transporteur_nom)) {
+                  const meta = transporterMetaMap.get(row.transporteur_id);
                   transpMap.set(row.transporteur_nom, {
                     id: row.transporteur_id,
                     name: row.transporteur_nom,
-                    hasBreakOfCharge: row.break_of_charge || false,
-                    breakOfChargeCost: row.break_of_charge_cost || 0,
+                    hasBreakOfCharge:
+                      meta?.hasBreakOfCharge ?? Boolean(row.break_of_charge),
+                    breakOfChargeCost:
+                      meta?.breakOfChargeCost ??
+                      toFiniteNumber(row.break_of_charge_cost || 0, 0),
+                    breakOfChargeKmCost: meta?.breakOfChargeKmCost ?? 0,
                     rates: [],
                   });
                 }
@@ -1767,6 +2322,219 @@
             .filter(Boolean);
         }, [selectedDepts, departments]);
 
+        const fetchSegmentDistance = useCallback(
+          async (startDept, endDept, signal) => {
+            const parseNumeric = (value) => {
+              if (typeof value === "number" && Number.isFinite(value)) {
+                return value;
+              }
+              if (typeof value === "string") {
+                const normalized = value.replace(",", ".").trim();
+                if (!normalized) {
+                  return null;
+                }
+                const numeric = Number(normalized);
+                return Number.isFinite(numeric) ? numeric : null;
+              }
+              return null;
+            };
+
+            const startLat = parseNumeric(startDept?.latitude);
+            const startLon = parseNumeric(startDept?.longitude);
+            const endLat = parseNumeric(endDept?.latitude);
+            const endLon = parseNumeric(endDept?.longitude);
+
+            if (
+              !Number.isFinite(startLat) ||
+              !Number.isFinite(startLon) ||
+              !Number.isFinite(endLat) ||
+              !Number.isFinite(endLon)
+            ) {
+              throw new Error("Coordonnées invalides pour le segment à calculer.");
+            }
+
+            const formatKeyValue = (value) =>
+              Number.isFinite(value) ? value.toFixed(6) : String(value ?? "");
+
+            const cacheKey = `${formatKeyValue(startLat)},${formatKeyValue(
+              startLon
+            )}|${formatKeyValue(endLat)},${formatKeyValue(endLon)}`;
+            const reverseKey = `${formatKeyValue(endLat)},${formatKeyValue(
+              endLon
+            )}|${formatKeyValue(startLat)},${formatKeyValue(startLon)}`;
+
+            const cache = routeCacheRef.current;
+
+            if (cache.has(cacheKey)) {
+              return cache.get(cacheKey);
+            }
+            if (cache.has(reverseKey)) {
+              return cache.get(reverseKey);
+            }
+
+            if (!OPENROUTESERVICE_API_KEY) {
+              throw new Error("Clé API OpenRouteService manquante.");
+            }
+
+            const response = await fetch(
+              `https://api.openrouteservice.org/v2/directions/${OPENROUTESERVICE_PROFILE}`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: OPENROUTESERVICE_API_KEY,
+                },
+                body: JSON.stringify({
+                  coordinates: [
+                    [startLon, startLat],
+                    [endLon, endLat],
+                  ],
+                }),
+                signal,
+              }
+            );
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              throw new Error(
+                `Erreur OpenRouteService (${response.status}) : ${
+                  errorText || response.statusText
+                }`
+              );
+            }
+
+            const json = await response.json();
+            const distanceMeters =
+              json?.features?.[0]?.properties?.summary?.distance;
+
+            if (!Number.isFinite(distanceMeters)) {
+              throw new Error("Distance OpenRouteService indisponible.");
+            }
+
+            const distanceKm = distanceMeters / 1000;
+            cache.set(cacheKey, distanceKm);
+            cache.set(reverseKey, distanceKm);
+
+            return distanceKm;
+          },
+          []
+        );
+
+        useEffect(() => {
+          if (optimalRoute.length < 2) {
+            setRouteMetrics({
+              loading: false,
+              totalDistanceKm: 0,
+              segmentDetails: [],
+              error: null,
+            });
+            return;
+          }
+
+          const parseNumeric = (value) => {
+            if (typeof value === "number" && Number.isFinite(value)) {
+              return value;
+            }
+            if (typeof value === "string") {
+              const normalized = value.replace(",", ".").trim();
+              if (!normalized) {
+                return null;
+              }
+              const numeric = Number(normalized);
+              return Number.isFinite(numeric) ? numeric : null;
+            }
+            return null;
+          };
+
+          const missingCoordinateDept = optimalRoute.find(
+            (dept) =>
+              !Number.isFinite(parseNumeric(dept?.latitude)) ||
+              !Number.isFinite(parseNumeric(dept?.longitude))
+          );
+
+          if (missingCoordinateDept) {
+            setRouteMetrics({
+              loading: false,
+              totalDistanceKm: 0,
+              segmentDetails: [],
+              error: `Coordonnées manquantes pour ${
+                missingCoordinateDept.code ||
+                missingCoordinateDept.name ||
+                "un département"
+              }`,
+            });
+            return;
+          }
+
+          let isActive = true;
+          const abortController = new AbortController();
+
+          setRouteMetrics({
+            loading: true,
+            totalDistanceKm: 0,
+            segmentDetails: [],
+            error: null,
+          });
+
+          (async () => {
+            try {
+              const segments = [];
+              let totalDistanceKm = 0;
+
+              for (let index = 0; index < optimalRoute.length - 1; index += 1) {
+                const startDept = optimalRoute[index];
+                const endDept = optimalRoute[index + 1];
+
+                const distanceKm = await fetchSegmentDistance(
+                  startDept,
+                  endDept,
+                  abortController.signal
+                );
+
+                if (!isActive) {
+                  return;
+                }
+
+                segments.push({
+                  from: startDept,
+                  to: endDept,
+                  distanceKm,
+                });
+                totalDistanceKm += distanceKm;
+              }
+
+              if (!isActive) {
+                return;
+              }
+
+              setRouteMetrics({
+                loading: false,
+                totalDistanceKm,
+                segmentDetails: segments,
+                error: null,
+              });
+            } catch (err) {
+              if (!isActive || err.name === "AbortError") {
+                return;
+              }
+
+              setRouteMetrics({
+                loading: false,
+                totalDistanceKm: 0,
+                segmentDetails: [],
+                error:
+                  err.message ||
+                  "Impossible de calculer le détour via OpenRouteService.",
+              });
+            }
+          })();
+
+          return () => {
+            isActive = false;
+            abortController.abort();
+          };
+        }, [optimalRoute, fetchSegmentDistance]);
+
         const filteredDepartments = useMemo(() => {
           const query = departmentSearch.trim().toLowerCase();
 
@@ -1783,6 +2551,12 @@
 
         const bestTransporters = useMemo(() => {
           if (!selectedDepts.length || !truckType || !transporters.length) return [];
+
+          const hasMultipleDepartments = optimalRoute.length > 1;
+          const detourKmAvailable =
+            hasMultipleDepartments && !routeMetrics.loading && !routeMetrics.error
+              ? routeMetrics.totalDistanceKm
+              : 0;
 
           const rankedResults = [];
 
@@ -1830,22 +2604,70 @@
               );
             }
 
+            if (hasMultipleDepartments) {
+              if (routeMetrics.loading) {
+                details.push("Calcul du détour en cours via OpenRouteService...");
+              } else if (routeMetrics.error) {
+                details.push(`Détour indisponible : ${routeMetrics.error}`);
+              } else {
+                details.push(
+                  `Détour total estimé : ${routeMetrics.totalDistanceKm.toFixed(2)} km via OpenRouteService.`
+                );
+                routeMetrics.segmentDetails.forEach((segment, segmentIndex) => {
+                  const fromLabel = `${segment.from.code} → ${segment.to.code}`;
+                  details.push(
+                    `↪︎ Segment ${segmentIndex + 1} (${fromLabel}) : ${segment.distanceKm.toFixed(2)} km`
+                  );
+                });
+              }
+            }
+
             let totalCost = furthestCost;
 
-            if (transporter.hasBreakOfCharge) {
+            if (hasMultipleDepartments && transporter.hasBreakOfCharge) {
               const breakCost = Number(transporter.breakOfChargeCost);
               if (!Number.isFinite(breakCost) || breakCost < 0) {
                 continue;
               }
               totalCost += breakCost;
               details.push(`+ Rupture de charge : ${breakCost.toFixed(2)}€`);
+
+              const perKmCostRaw = Number(transporter.breakOfChargeKmCost);
+              const perKmCost =
+                Number.isFinite(perKmCostRaw) && perKmCostRaw >= 0 ? perKmCostRaw : 0;
+
+              if (!routeMetrics.loading && !routeMetrics.error && detourKmAvailable > 0) {
+                if (perKmCost > 0) {
+                  const detourCost = detourKmAvailable * perKmCost;
+                  totalCost += detourCost;
+                  details.push(
+                    `+ Détour (${detourKmAvailable.toFixed(2)} km × ${perKmCost.toFixed(2)}€/km) : ${detourCost.toFixed(2)}€`
+                  );
+                } else {
+                  details.push(
+                    `Détour de ${detourKmAvailable.toFixed(2)} km non facturé (0€/km configuré).`
+                  );
+                }
+              } else if (routeMetrics.loading && perKmCost > 0) {
+                details.push(
+                  "Calcul du détour en cours pour appliquer les frais kilométriques..."
+                );
+              } else if (routeMetrics.error && perKmCost > 0) {
+                details.push(
+                  `Frais kilométriques non calculés : ${routeMetrics.error}`
+                );
+              }
+            } else if (!hasMultipleDepartments && transporter.hasBreakOfCharge) {
+              details.push(
+                "Un seul département : aucun supplément de rupture appliqué."
+              );
             }
 
             rankedResults.push({ transporter, totalCost, details });
           }
 
           return rankedResults.sort((a, b) => a.totalCost - b.totalCost);
-        }, [optimalRoute, transporters, truckType]);
+        }, [optimalRoute, routeMetrics, selectedDepts.length, transporters, truckType]);
 
         useEffect(() => {
           const topLength = Math.min(3, bestTransporters.length);
@@ -2647,6 +3469,27 @@
                     </li>
                   ))}
                 </ol>
+                {optimalRoute.length > 1 && (
+                  <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
+                    {routeMetrics.loading ? (
+                      <p>Calcul du détour en cours via OpenRouteService...</p>
+                    ) : routeMetrics.error ? (
+                      <p>Impossible de calculer le détour : {routeMetrics.error}</p>
+                    ) : (
+                      <>
+                        <p>
+                          Détour total estimé : {routeMetrics.totalDistanceKm.toFixed(2)} km (profil camion).
+                        </p>
+                        {routeMetrics.segmentDetails.map((segment, index) => (
+                          <p key={`${segment.from.id}-${segment.to.id}-${index}`}>
+                            ↪︎ Segment {segment.from.code} → {segment.to.code} :{" "}
+                            {segment.distanceKm.toFixed(2)} km
+                          </p>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
               )}
             </div>
 
@@ -2697,7 +3540,22 @@
                                       <span className="font-semibold text-gray-800">{transporter.name}</span>
                                       {transporter.hasBreakOfCharge && (
                                         <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded self-start md:self-auto">
-                                          Rupture de charge : {transporter.breakOfChargeCost}€
+                                          {(() => {
+                                            const baseCost = Number(
+                                              transporter.breakOfChargeCost || 0
+                                            );
+                                            const kmCost = Number(
+                                              transporter.breakOfChargeKmCost || 0
+                                            );
+                                            const baseLabel = Number.isFinite(baseCost)
+                                              ? `${baseCost.toFixed(2)}€`
+                                              : "-";
+                                            const kmLabel =
+                                              Number.isFinite(kmCost) && kmCost > 0
+                                                ? ` + ${kmCost.toFixed(2)}€/km`
+                                                : "";
+                                            return `Rupture de charge : ${baseLabel}${kmLabel}`;
+                                          })()}
                                         </span>
                                       )}
                                     </div>
