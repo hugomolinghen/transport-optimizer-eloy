@@ -1515,6 +1515,13 @@
         const [dataReloadFlag, setDataReloadFlag] = useState(0);
         const [adminPanelActive, setAdminPanelActive] = useState(false);
         const [adminAutoOpened, setAdminAutoOpened] = useState(false);
+        const [isRegistering, setIsRegistering] = useState(false);
+        const [registerEmail, setRegisterEmail] = useState("");
+        const [registerUsername, setRegisterUsername] = useState("");
+        const [registerPassword, setRegisterPassword] = useState("");
+        const [registerError, setRegisterError] = useState("");
+        const [registerMessage, setRegisterMessage] = useState("");
+        const [isCreatingAccount, setIsCreatingAccount] = useState(false);
 
         const handleDataRefresh = useCallback(() => {
           setDataReloadFlag((value) => value + 1);
@@ -2093,6 +2100,69 @@
           [email, password]
         );
 
+        const handleSignUp = useCallback(
+          async (event) => {
+            event?.preventDefault();
+            setRegisterError("");
+            setRegisterMessage("");
+
+            const trimmedEmail = registerEmail.trim();
+            const trimmedUsername = registerUsername.trim();
+
+            if (!trimmedEmail || !trimmedEmail.includes("@")) {
+              setRegisterError(
+                "Merci d'indiquer une adresse email factice contenant le caractère @."
+              );
+              return;
+            }
+
+            if (!trimmedUsername) {
+              setRegisterError(
+                "Merci d'indiquer un nom d'utilisateur pour la connexion."
+              );
+              return;
+            }
+
+            if (!registerPassword) {
+              setRegisterError("Merci d'indiquer un mot de passe.");
+              return;
+            }
+
+            try {
+              setIsCreatingAccount(true);
+              const passwordValue = registerPassword;
+              const { error } = await supabase.auth.signUp({
+                email: trimmedEmail,
+                password: registerPassword,
+                options: {
+                  data: {
+                    username: trimmedUsername,
+                  },
+                },
+              });
+
+              if (error) throw error;
+
+              setRegisterMessage(
+                "Compte créé avec succès ! Vous pouvez maintenant vous connecter."
+              );
+              setEmail(trimmedEmail);
+              setPassword(passwordValue);
+              setRegisterEmail("");
+              setRegisterUsername("");
+              setRegisterPassword("");
+            } catch (err) {
+              console.error("❌ Erreur lors de la création du compte :", err);
+              setRegisterError(
+                err.message || "Impossible de créer le compte utilisateur."
+              );
+            } finally {
+              setIsCreatingAccount(false);
+            }
+          },
+          [registerEmail, registerPassword, registerUsername]
+        );
+
         /********************************************
          *  INTERFACE UTILISATEUR
          ********************************************/
@@ -2110,50 +2180,152 @@
                 <div className="flex items-center gap-3">
                   <UnlockIcon className="text-indigo-600" size={32} />
                   <div>
-                    <h1 className="text-2xl font-bold text-gray-800">Connexion Supabase</h1>
+                    <h1 className="text-2xl font-bold text-gray-800">
+                      {isRegistering ? "Créer un compte" : "Connexion Supabase"}
+                    </h1>
                     <p className="text-sm text-gray-500">
-                      Connectez-vous pour accéder aux données transporteurs.
+                      {isRegistering
+                        ? "Renseignez un email factice, un nom d'utilisateur et un mot de passe."
+                        : "Connectez-vous pour accéder aux données transporteurs."}
                     </p>
                   </div>
                 </div>
-                {authError && (
-                  <div className="bg-red-50 text-red-600 text-sm p-3 rounded">
-                    {authError}
-                  </div>
+
+                {isRegistering ? (
+                  <>
+                    {registerError && (
+                      <div className="bg-red-50 text-red-600 text-sm p-3 rounded">
+                        {registerError}
+                      </div>
+                    )}
+                    {registerMessage && (
+                      <div className="bg-green-50 text-green-700 text-sm p-3 rounded">
+                        {registerMessage}
+                      </div>
+                    )}
+                    <form className="space-y-4" onSubmit={handleSignUp}>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Adresse email factice
+                        </label>
+                        <input
+                          type="email"
+                          value={registerEmail}
+                          onChange={(e) => setRegisterEmail(e.target.value)}
+                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                          placeholder="votre@adresse-factice.com"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Nom d'utilisateur
+                        </label>
+                        <input
+                          type="text"
+                          value={registerUsername}
+                          onChange={(e) => setRegisterUsername(e.target.value)}
+                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                          placeholder="Votre identifiant"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Mot de passe
+                        </label>
+                        <input
+                          type="password"
+                          value={registerPassword}
+                          onChange={(e) => setRegisterPassword(e.target.value)}
+                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                          placeholder="••••••••"
+                          required
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+                        disabled={isCreatingAccount}
+                      >
+                        {isCreatingAccount ? "Création en cours..." : "Créer le compte"}
+                      </button>
+                    </form>
+                    <p className="text-sm text-gray-600 text-center">
+                      Déjà un compte ?
+                      <button
+                        type="button"
+                        className="text-indigo-600 font-medium ml-1"
+                        onClick={() => {
+                          setIsRegistering(false);
+                          setRegisterError("");
+                          setRegisterMessage("");
+                        }}
+                      >
+                        Se connecter
+                      </button>
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    {authError && (
+                      <div className="bg-red-50 text-red-600 text-sm p-3 rounded">
+                        {authError}
+                      </div>
+                    )}
+                    <form className="space-y-4" onSubmit={handleLogin}>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Email de connexion
+                        </label>
+                        <input
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                          placeholder="vous@exemple.com"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Mot de passe
+                        </label>
+                        <input
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                          placeholder="••••••••"
+                          required
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+                        disabled={!email || !password}
+                      >
+                        Se connecter
+                      </button>
+                      <p className="text-xs text-gray-500 text-center">
+                        Utilisez la même adresse email factice que celle saisie lors de la création du compte.
+                      </p>
+                    </form>
+                    <p className="text-sm text-gray-600 text-center">
+                      Pas encore de compte ?
+                      <button
+                        type="button"
+                        className="text-indigo-600 font-medium ml-1"
+                        onClick={() => {
+                          setIsRegistering(true);
+                          setAuthError("");
+                        }}
+                      >
+                        Créer un compte
+                      </button>
+                    </p>
+                  </>
                 )}
-                <form className="space-y-4" onSubmit={handleLogin}>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Email
-                    </label>
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
-                      placeholder="vous@exemple.com"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Mot de passe
-                    </label>
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
-                      placeholder="••••••••"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
-                    disabled={!email || !password}
-                  >
-                    Se connecter
-                  </button>
-                </form>
               </div>
             </div>
           );
