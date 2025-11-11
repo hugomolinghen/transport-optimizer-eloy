@@ -68,6 +68,8 @@
       const SaveIcon = lucide.Save || createFallbackIcon("💾");
       const RefreshIcon = lucide.RefreshCcw || createFallbackIcon("🔁");
       const UsersIcon = lucide.Users || createFallbackIcon("🧑‍🤝‍🧑");
+      const TrashIcon =
+        lucide.Trash2 || lucide.Trash || createFallbackIcon("🗑️");
 
       const ADMIN_EMAILS = ["admin@eloy", "admin@eloy.com"];
 
@@ -147,6 +149,8 @@
         const [csvError, setCsvError] = useState("");
         const [isSavingTariffs, setIsSavingTariffs] = useState(false);
         const [isSavingTransporters, setIsSavingTransporters] = useState(false);
+        const [isDeletingTransporterId, setIsDeletingTransporterId] =
+          useState(null);
         const [isImporting, setIsImporting] = useState(false);
         const [tariffRows, setTariffRows] = useState([]);
         const [expandedTransporters, setExpandedTransporters] = useState([]);
@@ -632,6 +636,68 @@
               breakOfChargeCost: "",
             },
           ]);
+        };
+
+        const handleDeleteTransporter = async (index) => {
+          const row = transporterRows[index];
+          if (!row) {
+            return;
+          }
+
+          const displayName =
+            (row.name && row.name.trim()) ||
+            (row.id ? `Transporteur #${row.id}` : "ce transporteur");
+
+          const confirmed = window.confirm(
+            `Voulez-vous supprimer ${displayName} ? Cette action supprimera également ses tarifs.`,
+          );
+
+          if (!confirmed) {
+            return;
+          }
+
+          try {
+            setAdminError("");
+            setAdminMessage("");
+
+            if (!row.id || !transporterSourceMap.has(row.id)) {
+              setTransporterRows((previous) =>
+                previous.filter((_, itemIndex) => itemIndex !== index),
+              );
+              setAdminMessage("Transporteur supprimé.");
+              return;
+            }
+
+            setIsDeletingTransporterId(row.id);
+
+            const transporterId = row.id;
+
+            const { error: tariffsError } = await supabase
+              .from("tarifs_transporteurs")
+              .delete()
+              .eq("transporteur_id", transporterId);
+
+            if (tariffsError) throw tariffsError;
+
+            const { error } = await supabase
+              .from("transporteurs")
+              .delete()
+              .eq("id", transporterId);
+
+            if (error) throw error;
+
+            setAdminMessage("Transporteur supprimé.");
+            await loadAdminData();
+            onDataUpdated?.();
+          } catch (err) {
+            console.error("❌ Erreur suppression transporteur :", err);
+            setAdminError(
+              err.message ||
+                "Impossible de supprimer ce transporteur pour le moment.",
+            );
+          } finally {
+            setIsDeletingTransporterId(null);
+          }
         };
 
         const handleSaveTariffs = async () => {
@@ -1180,6 +1246,9 @@
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">
                       Coût rupture (€)
                     </th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-700">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -1236,6 +1305,23 @@
                           }`}
                           placeholder="0"
                         />
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTransporter(index)}
+                          disabled={
+                            isSavingTransporters ||
+                            isSavingTariffs ||
+                            isImporting ||
+                            (row.id !== undefined &&
+                              row.id !== null &&
+                              isDeletingTransporterId === row.id)
+                          }
+                          className="inline-flex items-center gap-1 rounded-md border border-red-200 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <TrashIcon size={14} /> Supprimer
+                        </button>
                       </td>
                     </tr>
                   ))}
