@@ -69,7 +69,32 @@
       const RefreshIcon = lucide.RefreshCcw || createFallbackIcon("🔁");
       const UsersIcon = lucide.Users || createFallbackIcon("🧑‍🤝‍🧑");
 
-      const ADMIN_EMAILS = ["admin@eloy", "admin@eloy.com"]; 
+      const ADMIN_EMAILS = ["admin@eloy", "admin@eloy.com"];
+
+      const normalizeDepartmentCode = (value) => {
+        if (value === null || value === undefined) {
+          return "";
+        }
+        return String(value).trim().toLowerCase();
+      };
+
+      const buildTariffKey = (transporteurId, departementId, departementCode) => {
+        if (!transporteurId) return null;
+        if (
+          departementId !== null &&
+          departementId !== undefined &&
+          departementId !== ""
+        ) {
+          return `id:${transporteurId}-${departementId}`;
+        }
+
+        const normalizedCode = normalizeDepartmentCode(departementCode);
+        if (normalizedCode) {
+          return `code:${transporteurId}-${normalizedCode}`;
+        }
+
+        return null;
+      };
 
       const parseTariff = (rawCost) => {
         if (rawCost === null || rawCost === undefined) {
@@ -216,18 +241,84 @@
             const departmentMap = new Map(
               departments.map((item) => [item.id, item])
             );
+            const departmentCodeMap = new Map(
+              departments
+                .filter((item) => item.code)
+                .map((item) => [
+                  normalizeDepartmentCode(item.code),
+                  item,
+                ])
+            );
 
             const tariffs = (tariffsResult.data || [])
               .map((row) => {
                 const transporteurId =
                   row.transporteur_id ?? row.transporter_id ?? row.transporteur ?? null;
-                const departementId =
+                const departementCodeRaw =
+                  row.departement_code ?? row.department_code ?? row.code ?? null;
+                let departementId =
                   row.departement_id ?? row.department_id ?? row.departement ?? null;
-                if (!transporteurId || !departementId) {
+
+                if (!transporteurId) {
                   return null;
                 }
-                const transporter = transporterMap.get(transporteurId);
-                const department = departmentMap.get(departementId);
+                let transporter = null;
+                if (transporteurId !== null && transporteurId !== undefined) {
+                  transporter = transporterMap.get(transporteurId) || null;
+                }
+
+                let department = null;
+                if (departementId !== null && departementId !== undefined) {
+                  department = departmentMap.get(departementId) || null;
+                }
+
+                if (!department && departementCodeRaw) {
+                  const matchedDepartment =
+                    departmentCodeMap.get(
+                      normalizeDepartmentCode(departementCodeRaw)
+                    ) || null;
+                  if (matchedDepartment) {
+                    department = matchedDepartment;
+                    if (
+                      departementId === null ||
+                      departementId === undefined ||
+                      departementId === ""
+                    ) {
+                      departementId = matchedDepartment.id;
+                    }
+                  }
+                }
+
+                const departmentCodeForSave = (() => {
+                  if (department?.code) {
+                    return department.code.trim();
+                  }
+                  if (
+                    typeof departementCodeRaw === "string" &&
+                    departementCodeRaw.trim()
+                  ) {
+                    return departementCodeRaw.trim();
+                  }
+                  if (
+                    departementCodeRaw !== null &&
+                    departementCodeRaw !== undefined
+                  ) {
+                    return String(departementCodeRaw).trim();
+                  }
+                  return "";
+                })();
+
+                if (!departementId && !departmentCodeForSave) {
+                  return null;
+                }
+
+                const transporterName =
+                  transporter?.name || `Transporteur #${transporteurId}`;
+                const departmentDisplayCode =
+                  departmentCodeForSave ||
+                  department?.code ||
+                  (departementId ? `Dept #${departementId}` : "");
+                const departmentName = department?.name || "";
 
                 const rawTarpsCost =
                   row.prix_bache ??
@@ -247,12 +338,12 @@
 
                 return {
                   transporteurId,
-                  departementId,
-                  transporterName:
-                    transporter?.name || `Transporteur #${transporteurId}`,
-                  departmentCode:
-                    department?.code || `Dept #${departementId}`,
-                  departmentName: department?.name || "",
+                  departementId:
+                    departementId ?? department?.id ?? null,
+                  transporterName,
+                  departmentCode: departmentDisplayCode || "",
+                  departmentCodeForSave: departmentCodeForSave || null,
+                  departmentName,
                   tarpsCost: formattedTarps,
                   flatbedCost: formattedFlatbed,
                   originalTarpsCost: formattedTarps,
@@ -262,12 +353,26 @@
               })
               .filter(Boolean);
 
-            const existingTariffMap = new Map(
-              tariffs.map((item) => [
-                `${item.transporteurId}-${item.departementId}`,
-                item,
-              ])
-            );
+            const existingTariffMap = new Map();
+            tariffs.forEach((item) => {
+              const keyById = buildTariffKey(
+                item.transporteurId,
+                item.departementId,
+                null
+              );
+              if (keyById) {
+                existingTariffMap.set(keyById, item);
+              }
+
+              const keyByCode = buildTariffKey(
+                item.transporteurId,
+                null,
+                item.departmentCodeForSave || item.departmentCode
+              );
+              if (keyByCode) {
+                existingTariffMap.set(keyByCode, item);
+              }
+            });
 
             const sortedTransporters = [...transporters].sort((a, b) => {
               const nameA = a.name || `Transporteur #${a.id}`;
@@ -284,8 +389,19 @@
 
             sortedTransporters.forEach((transporter) => {
               sortedDepartments.forEach((department) => {
-                const key = `${transporter.id}-${department.id}`;
-                const existing = existingTariffMap.get(key);
+                const keyById = buildTariffKey(
+                  transporter.id,
+                  department.id,
+                  null
+                );
+                const keyByCode = buildTariffKey(
+                  transporter.id,
+                  null,
+                  department.code
+                );
+                const existing =
+                  existingTariffMap.get(keyById) ||
+                  existingTariffMap.get(keyByCode);
 
                 completeTariffs.push({
                   transporteurId: transporter.id,
@@ -293,13 +409,17 @@
                   transporterName:
                     transporter.name || `Transporteur #${transporter.id}`,
                   departmentCode:
-                    department.code || `Dept #${department.id}`,
-                  departmentName: department.name || "",
+                    existing?.departmentCode ||
+                    department.code ||
+                    `Dept #${department.id}`,
+                  departmentCodeForSave:
+                    existing?.departmentCodeForSave ?? department.code ?? null,
+                  departmentName: existing?.departmentName || department.name || "",
                   tarpsCost: existing?.tarpsCost ?? "",
                   flatbedCost: existing?.flatbedCost ?? "",
                   originalTarpsCost: existing?.originalTarpsCost ?? "",
                   originalFlatbedCost: existing?.originalFlatbedCost ?? "",
-                  hasExistingTariff: Boolean(existing),
+                  hasExistingTariff: Boolean(existing?.hasExistingTariff ?? existing),
                 });
               });
             });
@@ -521,6 +641,9 @@
             setAdminMessage("");
 
             const payload = [];
+            const departmentById = new Map(
+              rawDepartments.map((dept) => [dept.id, dept])
+            );
 
             tariffRows.forEach((row) => {
               const tarpsCost = normalizeNumber(row.tarpsCost);
@@ -542,9 +665,34 @@
                 return;
               }
 
+              let departementCodeForSave =
+                (row.departmentCodeForSave && row.departmentCodeForSave.trim()) || "";
+
+              if (!departementCodeForSave) {
+                const baseDepartment = departmentById.get(row.departementId);
+                if (baseDepartment?.code) {
+                  departementCodeForSave = baseDepartment.code.trim();
+                }
+              }
+
+              if (!departementCodeForSave && row.departmentCode) {
+                const trimmed = row.departmentCode.trim();
+                if (!trimmed.toLowerCase().startsWith("dept #")) {
+                  departementCodeForSave = trimmed;
+                }
+              }
+
+              if (!departementCodeForSave) {
+                throw new Error(
+                  `Impossible de déterminer le code du département pour ${
+                    row.transporterName || `transporteur #${row.transporteurId}`
+                  } (département ${row.departementId ?? "inconnu"}).`
+                );
+              }
+
               payload.push({
                 transporteur_id: row.transporteurId,
-                departement_id: row.departementId,
+                departement_code: departementCodeForSave,
                 prix_bache: tarpsCost,
                 prix_plateau: flatbedCost,
               });
@@ -558,7 +706,7 @@
             const { error } = await supabase
               .from("tarifs_transporteurs")
               .upsert(payload, {
-                onConflict: "transporteur_id,departement_id",
+                onConflict: "transporteur_id,departement_code",
               });
 
             if (error) throw error;
@@ -755,6 +903,7 @@
                 }
 
                 let departementId = null;
+                let rawDepartmentCode = "";
                 if (departmentIdIndex !== -1) {
                   const cell = cells[departmentIdIndex];
                   const parsed = Number(cell);
@@ -762,10 +911,13 @@
                 }
 
                 if (!departementId && departmentCodeIndex !== -1) {
-                  const codeCell = cells[departmentCodeIndex]?.trim().toLowerCase();
+                  rawDepartmentCode = cells[departmentCodeIndex] || "";
+                  const codeCell = rawDepartmentCode.trim().toLowerCase();
                   departementId = codeCell
                     ? departmentCodeToId.get(codeCell) || null
                     : null;
+                } else if (departmentCodeIndex !== -1) {
+                  rawDepartmentCode = cells[departmentCodeIndex] || "";
                 }
 
                 if (!departementId) {
@@ -785,6 +937,9 @@
 
                 const transporter = transporterMap.get(transporteurId);
                 const department = departmentMap.get(departementId);
+                const departmentCodeForSave = department?.code
+                  ? department.code.trim()
+                  : rawDepartmentCode.trim() || null;
 
                 importedRows.push({
                   transporteurId,
@@ -792,7 +947,10 @@
                   transporterName:
                     transporter?.name || `Transporteur #${transporteurId}`,
                   departmentCode:
-                    department?.code || `Dept #${departementId}`,
+                    department?.code ||
+                    rawDepartmentCode.trim() ||
+                    `Dept #${departementId}`,
+                  departmentCodeForSave: departmentCodeForSave || null,
                   departmentName: department?.name || "",
                   tarpsCost: tarpsValue,
                   flatbedCost: flatbedValue,
@@ -806,15 +964,24 @@
               }
 
               setTariffRows((previous) => {
-                const map = new Map(
-                  previous.map((row) => [
-                    `${row.transporteurId}-${row.departementId}`,
-                    row,
-                  ])
-                );
+                const map = new Map();
+                previous.forEach((row) => {
+                  const key =
+                    buildTariffKey(
+                      row.transporteurId,
+                      row.departementId,
+                      row.departmentCodeForSave || row.departmentCode
+                    ) || `${row.transporteurId}-${row.departementId}`;
+                  map.set(key, row);
+                });
 
                 importedRows.forEach((row) => {
-                  const key = `${row.transporteurId}-${row.departementId}`;
+                  const key =
+                    buildTariffKey(
+                      row.transporteurId,
+                      row.departementId,
+                      row.departmentCodeForSave || row.departmentCode
+                    ) || `${row.transporteurId}-${row.departementId}`;
                   const previousRow = map.get(key) || {};
                   map.set(key, {
                     ...previousRow,
