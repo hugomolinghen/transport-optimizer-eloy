@@ -68,8 +68,35 @@
       const SaveIcon = lucide.Save || createFallbackIcon("💾");
       const RefreshIcon = lucide.RefreshCcw || createFallbackIcon("🔁");
       const UsersIcon = lucide.Users || createFallbackIcon("🧑‍🤝‍🧑");
+      const TrashIcon =
+        lucide.Trash2 || lucide.Trash || createFallbackIcon("🗑️");
 
-      const ADMIN_EMAILS = ["admin@eloy", "admin@eloy.com"]; 
+      const ADMIN_EMAILS = ["admin@eloy", "admin@eloy.com"];
+
+      const normalizeDepartmentCode = (value) => {
+        if (value === null || value === undefined) {
+          return "";
+        }
+        return String(value).trim().toLowerCase();
+      };
+
+      const buildTariffKey = (transporteurId, departementId, departementCode) => {
+        if (!transporteurId) return null;
+        if (
+          departementId !== null &&
+          departementId !== undefined &&
+          departementId !== ""
+        ) {
+          return `id:${transporteurId}-${departementId}`;
+        }
+
+        const normalizedCode = normalizeDepartmentCode(departementCode);
+        if (normalizedCode) {
+          return `code:${transporteurId}-${normalizedCode}`;
+        }
+
+        return null;
+      };
 
       const parseTariff = (rawCost) => {
         if (rawCost === null || rawCost === undefined) {
@@ -122,8 +149,11 @@
         const [csvError, setCsvError] = useState("");
         const [isSavingTariffs, setIsSavingTariffs] = useState(false);
         const [isSavingTransporters, setIsSavingTransporters] = useState(false);
+        const [isDeletingTransporterId, setIsDeletingTransporterId] =
+          useState(null);
         const [isImporting, setIsImporting] = useState(false);
         const [tariffRows, setTariffRows] = useState([]);
+        const [expandedTransporters, setExpandedTransporters] = useState([]);
         const [transporterRows, setTransporterRows] = useState([]);
         const [transporterSourceRows, setTransporterSourceRows] = useState([]);
         const [rawDepartments, setRawDepartments] = useState([]);
@@ -139,6 +169,22 @@
             throw new Error(`La valeur "${value}" n'est pas un nombre valide.`);
           }
           return parsed;
+        };
+
+        const formatTariffForInput = (value) => {
+          if (value === null || value === undefined || value === "") {
+            return "";
+          }
+
+          try {
+            const parsed = normalizeNumber(value);
+            if (parsed === null) {
+              return "";
+            }
+            return String(parsed);
+          } catch (error) {
+            return String(value).trim();
+          }
         };
 
         const loadAdminData = useCallback(async () => {
@@ -199,55 +245,192 @@
             const departmentMap = new Map(
               departments.map((item) => [item.id, item])
             );
+            const departmentCodeMap = new Map(
+              departments
+                .filter((item) => item.code)
+                .map((item) => [
+                  normalizeDepartmentCode(item.code),
+                  item,
+                ])
+            );
 
             const tariffs = (tariffsResult.data || [])
               .map((row) => {
                 const transporteurId =
                   row.transporteur_id ?? row.transporter_id ?? row.transporteur ?? null;
-                const departementId =
+                const departementCodeRaw =
+                  row.departement_code ?? row.department_code ?? row.code ?? null;
+                let departementId =
                   row.departement_id ?? row.department_id ?? row.departement ?? null;
-                if (!transporteurId || !departementId) {
+
+                if (!transporteurId) {
                   return null;
                 }
-                const transporter = transporterMap.get(transporteurId);
-                const department = departmentMap.get(departementId);
+                let transporter = null;
+                if (transporteurId !== null && transporteurId !== undefined) {
+                  transporter = transporterMap.get(transporteurId) || null;
+                }
+
+                let department = null;
+                if (departementId !== null && departementId !== undefined) {
+                  department = departmentMap.get(departementId) || null;
+                }
+
+                if (!department && departementCodeRaw) {
+                  const matchedDepartment =
+                    departmentCodeMap.get(
+                      normalizeDepartmentCode(departementCodeRaw)
+                    ) || null;
+                  if (matchedDepartment) {
+                    department = matchedDepartment;
+                    if (
+                      departementId === null ||
+                      departementId === undefined ||
+                      departementId === ""
+                    ) {
+                      departementId = matchedDepartment.id;
+                    }
+                  }
+                }
+
+                const departmentCodeForSave = (() => {
+                  if (department?.code) {
+                    return department.code.trim();
+                  }
+                  if (
+                    typeof departementCodeRaw === "string" &&
+                    departementCodeRaw.trim()
+                  ) {
+                    return departementCodeRaw.trim();
+                  }
+                  if (
+                    departementCodeRaw !== null &&
+                    departementCodeRaw !== undefined
+                  ) {
+                    return String(departementCodeRaw).trim();
+                  }
+                  return "";
+                })();
+
+                if (!departementId && !departmentCodeForSave) {
+                  return null;
+                }
+
+                const transporterName =
+                  transporter?.name || `Transporteur #${transporteurId}`;
+                const departmentDisplayCode =
+                  departmentCodeForSave ||
+                  department?.code ||
+                  (departementId ? `Dept #${departementId}` : "");
+                const departmentName = department?.name || "";
+
+                const rawTarpsCost =
+                  row.prix_bache ??
+                  row.prix_tarps ??
+                  row.tarif_bache ??
+                  row.tarif_bache_ht ??
+                  "";
+                const rawFlatbedCost =
+                  row.prix_plateau ??
+                  row.prix_flatbed ??
+                  row.tarif_plateau ??
+                  row.tarif_plateau_ht ??
+                  "";
+
+                const formattedTarps = formatTariffForInput(rawTarpsCost);
+                const formattedFlatbed = formatTariffForInput(rawFlatbedCost);
 
                 return {
                   transporteurId,
-                  departementId,
-                  transporterName:
-                    transporter?.name || `Transporteur #${transporteurId}`,
-                  departmentCode:
-                    department?.code || `Dept #${departementId}`,
-                  tarpsCost:
-                    row.prix_bache ??
-                    row.prix_tarps ??
-                    row.tarif_bache ??
-                    row.tarif_bache_ht ??
-                    "",
-                  flatbedCost:
-                    row.prix_plateau ??
-                    row.prix_flatbed ??
-                    row.tarif_plateau ??
-                    row.tarif_plateau_ht ??
-                    "",
+                  departementId:
+                    departementId ?? department?.id ?? null,
+                  transporterName,
+                  departmentCode: departmentDisplayCode || "",
+                  departmentCodeForSave: departmentCodeForSave || null,
+                  departmentName,
+                  tarpsCost: formattedTarps,
+                  flatbedCost: formattedFlatbed,
+                  originalTarpsCost: formattedTarps,
+                  originalFlatbedCost: formattedFlatbed,
+                  hasExistingTariff: true,
                 };
               })
-              .filter(Boolean)
-              .sort((a, b) => {
-                if (a.transporterName === b.transporterName) {
-                  return a.departmentCode.localeCompare(b.departmentCode, "fr", {
-                    numeric: true,
-                  });
-                }
-                return a.transporterName.localeCompare(b.transporterName, "fr", {
-                  numeric: true,
+              .filter(Boolean);
+
+            const existingTariffMap = new Map();
+            tariffs.forEach((item) => {
+              const keyById = buildTariffKey(
+                item.transporteurId,
+                item.departementId,
+                null
+              );
+              if (keyById) {
+                existingTariffMap.set(keyById, item);
+              }
+
+              const keyByCode = buildTariffKey(
+                item.transporteurId,
+                null,
+                item.departmentCodeForSave || item.departmentCode
+              );
+              if (keyByCode) {
+                existingTariffMap.set(keyByCode, item);
+              }
+            });
+
+            const sortedTransporters = [...transporters].sort((a, b) => {
+              const nameA = a.name || `Transporteur #${a.id}`;
+              const nameB = b.name || `Transporteur #${b.id}`;
+              return nameA.localeCompare(nameB, "fr", { numeric: true });
+            });
+            const sortedDepartments = [...departments].sort((a, b) => {
+              const codeA = a.code || `Dept #${a.id}`;
+              const codeB = b.code || `Dept #${b.id}`;
+              return codeA.localeCompare(codeB, "fr", { numeric: true });
+            });
+
+            const completeTariffs = [];
+
+            sortedTransporters.forEach((transporter) => {
+              sortedDepartments.forEach((department) => {
+                const keyById = buildTariffKey(
+                  transporter.id,
+                  department.id,
+                  null
+                );
+                const keyByCode = buildTariffKey(
+                  transporter.id,
+                  null,
+                  department.code
+                );
+                const existing =
+                  existingTariffMap.get(keyById) ||
+                  existingTariffMap.get(keyByCode);
+
+                completeTariffs.push({
+                  transporteurId: transporter.id,
+                  departementId: department.id,
+                  transporterName:
+                    transporter.name || `Transporteur #${transporter.id}`,
+                  departmentCode:
+                    existing?.departmentCode ||
+                    department.code ||
+                    `Dept #${department.id}`,
+                  departmentCodeForSave:
+                    existing?.departmentCodeForSave ?? department.code ?? null,
+                  departmentName: existing?.departmentName || department.name || "",
+                  tarpsCost: existing?.tarpsCost ?? "",
+                  flatbedCost: existing?.flatbedCost ?? "",
+                  originalTarpsCost: existing?.originalTarpsCost ?? "",
+                  originalFlatbedCost: existing?.originalFlatbedCost ?? "",
+                  hasExistingTariff: Boolean(existing?.hasExistingTariff ?? existing),
                 });
               });
+            });
 
             setRawDepartments(departments);
             setRawTransporters(transporters);
-            setTariffRows(tariffs);
+            setTariffRows(completeTariffs);
             setTransporterSourceRows(transportersResult.data || []);
             setTransporterRows(
               transporters.map((item) => ({
@@ -283,6 +466,60 @@
           () => new Map(rawDepartments.map((item) => [item.id, item])),
           [rawDepartments]
         );
+
+        const groupedTariffs = useMemo(() => {
+          const groups = new Map();
+
+          tariffRows.forEach((row, index) => {
+            if (!groups.has(row.transporteurId)) {
+              groups.set(row.transporteurId, {
+                transporterId: row.transporteurId,
+                transporterName:
+                  row.transporterName || `Transporteur #${row.transporteurId}`,
+                departments: [],
+              });
+            }
+
+            const group = groups.get(row.transporteurId);
+            group.departments.push({ ...row, rowIndex: index });
+          });
+
+          return Array.from(groups.values())
+            .map((group) => ({
+              ...group,
+              departments: group.departments.sort((a, b) =>
+                (a.departmentCode || "").localeCompare(
+                  b.departmentCode || "",
+                  "fr",
+                  {
+                    numeric: true,
+                  }
+                )
+              ),
+            }))
+            .sort((a, b) =>
+              (a.transporterName || "").localeCompare(
+                b.transporterName || "",
+                "fr",
+                {
+                  numeric: true,
+                }
+              )
+            );
+        }, [tariffRows]);
+
+        useEffect(() => {
+          setExpandedTransporters((previous) => {
+            const validIds = new Set(
+              groupedTariffs.map((group) => group.transporterId)
+            );
+            const filtered = previous.filter((id) => validIds.has(id));
+            if (filtered.length === previous.length) {
+              return previous;
+            }
+            return filtered;
+          });
+        }, [groupedTariffs]);
 
         const transporterSourceMap = useMemo(
           () =>
@@ -363,6 +600,15 @@
           });
         }, [transporterRows]);
 
+        const toggleTransporterExpansion = useCallback((transporterId) => {
+          setExpandedTransporters((previous) => {
+            if (previous.includes(transporterId)) {
+              return previous.filter((id) => id !== transporterId);
+            }
+            return [...previous, transporterId];
+          });
+        }, []);
+
         const handleTariffFieldChange = (index, field, value) => {
           setTariffRows((previous) => {
             const next = [...previous];
@@ -392,36 +638,141 @@
           ]);
         };
 
+        const handleDeleteTransporter = async (index) => {
+          const row = transporterRows[index];
+          if (!row) {
+            return;
+          }
+
+          const displayName =
+            (row.name && row.name.trim()) ||
+            (row.id ? `Transporteur #${row.id}` : "ce transporteur");
+
+          const confirmed = window.confirm(
+            `Voulez-vous supprimer ${displayName} ? Cette action supprimera également ses tarifs.`,
+          );
+
+          if (!confirmed) {
+            return;
+          }
+
+          try {
+            setAdminError("");
+            setAdminMessage("");
+
+            if (!row.id || !transporterSourceMap.has(row.id)) {
+              setTransporterRows((previous) =>
+                previous.filter((_, itemIndex) => itemIndex !== index),
+              );
+              setAdminMessage("Transporteur supprimé.");
+              return;
+            }
+
+            setIsDeletingTransporterId(row.id);
+
+            const transporterId = row.id;
+
+            const { error: tariffsError } = await supabase
+              .from("tarifs_transporteurs")
+              .delete()
+              .eq("transporteur_id", transporterId);
+
+            if (tariffsError) throw tariffsError;
+
+            const { error } = await supabase
+              .from("transporteurs")
+              .delete()
+              .eq("id", transporterId);
+
+            if (error) throw error;
+
+            setAdminMessage("Transporteur supprimé.");
+            await loadAdminData();
+            onDataUpdated?.();
+          } catch (err) {
+            console.error("❌ Erreur suppression transporteur :", err);
+            setAdminError(
+              err.message ||
+                "Impossible de supprimer ce transporteur pour le moment.",
+            );
+          } finally {
+            setIsDeletingTransporterId(null);
+          }
+        };
+
         const handleSaveTariffs = async () => {
           try {
             setIsSavingTariffs(true);
             setAdminError("");
             setAdminMessage("");
 
-            const payload = tariffRows.map((row) => {
-              let tarpsCost = null;
-              let flatbedCost = null;
+            const payload = [];
+            const departmentById = new Map(
+              rawDepartments.map((dept) => [dept.id, dept])
+            );
 
-              if (row.tarpsCost !== "" && row.tarpsCost !== null) {
-                tarpsCost = normalizeNumber(row.tarpsCost);
+            tariffRows.forEach((row) => {
+              const tarpsCost = normalizeNumber(row.tarpsCost);
+              const flatbedCost = normalizeNumber(row.flatbedCost);
+              const originalTarps = normalizeNumber(row.originalTarpsCost);
+              const originalFlatbed = normalizeNumber(row.originalFlatbedCost);
+
+              const hasTarpsValue = tarpsCost !== null;
+              const hasFlatbedValue = flatbedCost !== null;
+
+              if (!row.hasExistingTariff && !hasTarpsValue && !hasFlatbedValue) {
+                return;
               }
 
-              if (row.flatbedCost !== "" && row.flatbedCost !== null) {
-                flatbedCost = normalizeNumber(row.flatbedCost);
+              const tarpsChanged = tarpsCost !== originalTarps;
+              const flatbedChanged = flatbedCost !== originalFlatbed;
+
+              if (!tarpsChanged && !flatbedChanged) {
+                return;
               }
 
-              return {
+              let departementCodeForSave =
+                (row.departmentCodeForSave && row.departmentCodeForSave.trim()) || "";
+
+              if (!departementCodeForSave) {
+                const baseDepartment = departmentById.get(row.departementId);
+                if (baseDepartment?.code) {
+                  departementCodeForSave = baseDepartment.code.trim();
+                }
+              }
+
+              if (!departementCodeForSave && row.departmentCode) {
+                const trimmed = row.departmentCode.trim();
+                if (!trimmed.toLowerCase().startsWith("dept #")) {
+                  departementCodeForSave = trimmed;
+                }
+              }
+
+              if (!departementCodeForSave) {
+                throw new Error(
+                  `Impossible de déterminer le code du département pour ${
+                    row.transporterName || `transporteur #${row.transporteurId}`
+                  } (département ${row.departementId ?? "inconnu"}).`
+                );
+              }
+
+              payload.push({
                 transporteur_id: row.transporteurId,
-                departement_id: row.departementId,
+                departement_code: departementCodeForSave,
                 prix_bache: tarpsCost,
                 prix_plateau: flatbedCost,
-              };
+              });
             });
+
+            if (!payload.length) {
+              setAdminMessage("Aucune modification détectée.");
+              return;
+            }
 
             const { error } = await supabase
               .from("tarifs_transporteurs")
               .upsert(payload, {
-                onConflict: "transporteur_id,departement_id",
+                onConflict: "transporteur_id,departement_code",
               });
 
             if (error) throw error;
@@ -534,6 +885,7 @@
               );
               const transporterNameIndex = getIndex(
                 "transporteur_nom",
+                "transporteur_name",
                 "transporter_name",
                 "nom"
               );
@@ -576,12 +928,12 @@
               const transporterNameToId = new Map(
                 rawTransporters
                   .filter((item) => item.name)
-                  .map((item) => [item.name.toLowerCase(), item.id])
+                  .map((item) => [item.name.trim().toLowerCase(), item.id])
               );
               const departmentCodeToId = new Map(
                 rawDepartments
                   .filter((item) => item.code)
-                  .map((item) => [item.code.toLowerCase(), item.id])
+                  .map((item) => [item.code.trim().toLowerCase(), item.id])
               );
 
               const importedRows = [];
@@ -602,7 +954,7 @@
                 }
 
                 if (!transporteurId && transporterNameIndex !== -1) {
-                  const nameCell = cells[transporterNameIndex]?.toLowerCase();
+                  const nameCell = cells[transporterNameIndex]?.trim().toLowerCase();
                   transporteurId = nameCell
                     ? transporterNameToId.get(nameCell) || null
                     : null;
@@ -617,6 +969,7 @@
                 }
 
                 let departementId = null;
+                let rawDepartmentCode = "";
                 if (departmentIdIndex !== -1) {
                   const cell = cells[departmentIdIndex];
                   const parsed = Number(cell);
@@ -624,10 +977,13 @@
                 }
 
                 if (!departementId && departmentCodeIndex !== -1) {
-                  const codeCell = cells[departmentCodeIndex]?.toLowerCase();
+                  rawDepartmentCode = cells[departmentCodeIndex] || "";
+                  const codeCell = rawDepartmentCode.trim().toLowerCase();
                   departementId = codeCell
                     ? departmentCodeToId.get(codeCell) || null
                     : null;
+                } else if (departmentCodeIndex !== -1) {
+                  rawDepartmentCode = cells[departmentCodeIndex] || "";
                 }
 
                 if (!departementId) {
@@ -638,12 +994,18 @@
                   continue;
                 }
 
-                const tarpsValue = tarpsIndex !== -1 ? cells[tarpsIndex] : "";
+                const tarpsValue =
+                  tarpsIndex !== -1 ? formatTariffForInput(cells[tarpsIndex]) : "";
                 const flatbedValue =
-                  flatbedIndex !== -1 ? cells[flatbedIndex] : "";
+                  flatbedIndex !== -1
+                    ? formatTariffForInput(cells[flatbedIndex])
+                    : "";
 
                 const transporter = transporterMap.get(transporteurId);
                 const department = departmentMap.get(departementId);
+                const departmentCodeForSave = department?.code
+                  ? department.code.trim()
+                  : rawDepartmentCode.trim() || null;
 
                 importedRows.push({
                   transporteurId,
@@ -651,7 +1013,11 @@
                   transporterName:
                     transporter?.name || `Transporteur #${transporteurId}`,
                   departmentCode:
-                    department?.code || `Dept #${departementId}`,
+                    department?.code ||
+                    rawDepartmentCode.trim() ||
+                    `Dept #${departementId}`,
+                  departmentCodeForSave: departmentCodeForSave || null,
+                  departmentName: department?.name || "",
                   tarpsCost: tarpsValue,
                   flatbedCost: flatbedValue,
                 });
@@ -664,18 +1030,31 @@
               }
 
               setTariffRows((previous) => {
-                const map = new Map(
-                  previous.map((row) => [
-                    `${row.transporteurId}-${row.departementId}`,
-                    row,
-                  ])
-                );
+                const map = new Map();
+                previous.forEach((row) => {
+                  const key =
+                    buildTariffKey(
+                      row.transporteurId,
+                      row.departementId,
+                      row.departmentCodeForSave || row.departmentCode
+                    ) || `${row.transporteurId}-${row.departementId}`;
+                  map.set(key, row);
+                });
 
                 importedRows.forEach((row) => {
-                  const key = `${row.transporteurId}-${row.departementId}`;
+                  const key =
+                    buildTariffKey(
+                      row.transporteurId,
+                      row.departementId,
+                      row.departmentCodeForSave || row.departmentCode
+                    ) || `${row.transporteurId}-${row.departementId}`;
+                  const previousRow = map.get(key) || {};
                   map.set(key, {
-                    ...(map.get(key) || {}),
+                    ...previousRow,
                     ...row,
+                    hasExistingTariff: previousRow.hasExistingTariff || false,
+                    originalTarpsCost: previousRow.originalTarpsCost ?? "",
+                    originalFlatbedCost: previousRow.originalFlatbedCost ?? "",
                   });
                 });
 
@@ -728,7 +1107,7 @@
         };
 
         const renderTariffTable = () => {
-          if (!tariffRows.length) {
+          if (!tariffRows.length || !groupedTariffs.length) {
             return (
               <p className="text-sm text-gray-500">
                 Aucun tarif n'est actuellement disponible. Importez un CSV ou
@@ -738,75 +1117,107 @@
           }
 
           return (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
-                      Transporteur
-                    </th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
-                      Département
-                    </th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
-                      Prix bâché (€)
-                    </th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
-                      Prix plateau (€)
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {tariffRows.map((row, index) => (
-                    <tr key={`${row.transporteurId}-${row.departementId}`} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 text-gray-700">
-                        <div className="font-medium text-gray-800">
-                          {row.transporterName}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          ID #{row.transporteurId}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-gray-700">
-                        <div className="font-medium text-gray-800">
-                          {row.departmentCode}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          ID #{row.departementId}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="text"
-                          value={row.tarpsCost ?? ""}
-                          onChange={(event) =>
-                            handleTariffFieldChange(
-                              index,
-                              "tarpsCost",
-                              event.target.value
-                            )
-                          }
-                          className="w-28 border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="text"
-                          value={row.flatbedCost ?? ""}
-                          onChange={(event) =>
-                            handleTariffFieldChange(
-                              index,
-                              "flatbedCost",
-                              event.target.value
-                            )
-                          }
-                          className="w-28 border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-4">
+              <p className="text-xs text-gray-500">
+                Cliquez sur un transporteur pour afficher et modifier ses tarifs
+                par département.
+              </p>
+
+              {groupedTariffs.map((group) => {
+                const isExpanded = expandedTransporters.includes(
+                  group.transporterId
+                );
+
+                return (
+                  <div
+                    key={group.transporterId}
+                    className="border border-gray-200 rounded-lg overflow-hidden"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleTransporterExpansion(group.transporterId)}
+                      className="w-full flex items-center justify-between gap-4 px-4 py-3 bg-gray-50 hover:bg-gray-100 transition"
+                    >
+                      <div className="text-left">
+                        <p className="font-semibold text-gray-800">
+                          {group.transporterName}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {group.departments.length} département
+                          {group.departments.length > 1 ? "s" : ""}
+                        </p>
+                      </div>
+                      <span className="text-sm text-indigo-600 font-medium">
+                        {isExpanded ? "Masquer" : "Afficher"}
+                      </span>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="overflow-x-auto border-t border-gray-200">
+                        <table className="min-w-full divide-y divide-gray-200 text-sm">
+                          <thead className="bg-white">
+                            <tr>
+                              <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                                Département
+                              </th>
+                              <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                                Prix bâché (€)
+                              </th>
+                              <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                                Prix plateau (€)
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {group.departments.map((row) => (
+                              <tr key={`${row.transporteurId}-${row.departementId}`} className="hover:bg-gray-50">
+                                <td className="px-4 py-2 text-gray-700">
+                                  <div className="font-medium text-gray-800">
+                                    {row.departmentCode}
+                                  </div>
+                                  {row.departmentName && (
+                                    <div className="text-xs text-gray-500">
+                                      {row.departmentName}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2">
+                                  <input
+                                    type="text"
+                                    value={row.tarpsCost ?? ""}
+                                    onChange={(event) =>
+                                      handleTariffFieldChange(
+                                        row.rowIndex,
+                                        "tarpsCost",
+                                        event.target.value
+                                      )
+                                    }
+                                    className="w-28 border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                  />
+                                </td>
+                                <td className="px-4 py-2">
+                                  <input
+                                    type="text"
+                                    value={row.flatbedCost ?? ""}
+                                    onChange={(event) =>
+                                      handleTariffFieldChange(
+                                        row.rowIndex,
+                                        "flatbedCost",
+                                        event.target.value
+                                      )
+                                    }
+                                    className="w-28 border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                  />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         };
@@ -834,6 +1245,9 @@
                     </th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">
                       Coût rupture (€)
+                    </th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-700">
+                      Actions
                     </th>
                   </tr>
                 </thead>
@@ -891,6 +1305,23 @@
                           }`}
                           placeholder="0"
                         />
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTransporter(index)}
+                          disabled={
+                            isSavingTransporters ||
+                            isSavingTariffs ||
+                            isImporting ||
+                            (row.id !== undefined &&
+                              row.id !== null &&
+                              isDeletingTransporterId === row.id)
+                          }
+                          className="inline-flex items-center gap-1 rounded-md border border-red-200 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <TrashIcon size={14} /> Supprimer
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -983,8 +1414,9 @@
                     <>
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <span className="text-sm text-gray-500">
-                          {tariffRows.length} ligne{tariffRows.length > 1 ? "s" : ""}
-                          {" "}de tarifs
+                          {groupedTariffs.length} transporteur
+                          {groupedTariffs.length > 1 ? "s" : ""} • {rawDepartments.length}
+                          {" "}département{rawDepartments.length > 1 ? "s" : ""}
                         </span>
                         <div className="flex flex-wrap gap-3">
                           <button
@@ -1005,8 +1437,8 @@
                       </div>
                       <p className="text-xs text-gray-500">
                         Colonnes attendues pour l'import CSV : transporteur_id ou
-                        transporteur_nom, departement_id ou departement_code,
-                        prix_bache, prix_plateau.
+                        transporteur_nom/transporteur_name, departement_id ou
+                        departement_code, prix_bache, prix_plateau.
                       </p>
                       {renderTariffTable()}
                     </>
