@@ -71,7 +71,27 @@
       const TrashIcon =
         lucide.Trash2 || lucide.Trash || createFallbackIcon("🗑️");
 
-      const ADMIN_EMAILS = ["admin@eloy", "admin@eloy.com"];
+      const ADMIN_EMAILS = ["admin@users.eloy"];
+
+      const sanitizeUsername = (username) => {
+        if (!username) return "";
+
+        return username
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-zA-Z0-9._-]+/g, "-")
+          .toLowerCase()
+          .replace(/-+/g, "-")
+          .replace(/^-|-$/g, "");
+      };
+
+      const buildAuthEmailFromUsername = (username) => {
+        const sanitized = sanitizeUsername(username);
+        if (!sanitized) {
+          return "";
+        }
+        return `${sanitized}@users.eloy`;
+      };
 
       const normalizeDepartmentCode = (value) => {
         if (value === null || value === undefined) {
@@ -1515,6 +1535,14 @@
         const [dataReloadFlag, setDataReloadFlag] = useState(0);
         const [adminPanelActive, setAdminPanelActive] = useState(false);
         const [adminAutoOpened, setAdminAutoOpened] = useState(false);
+        const [isRegistering, setIsRegistering] = useState(false);
+        const [registerUsername, setRegisterUsername] = useState("");
+        const [registerPassword, setRegisterPassword] = useState("");
+        const [registerError, setRegisterError] = useState("");
+        const [registerMessage, setRegisterMessage] = useState("");
+        const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+        const [isLoginPasswordVisible, setIsLoginPasswordVisible] = useState(false);
+        const [isRegisterPasswordVisible, setIsRegisterPasswordVisible] = useState(false);
 
         const handleDataRefresh = useCallback(() => {
           setDataReloadFlag((value) => value + 1);
@@ -2076,12 +2104,33 @@
         const handleLogin = useCallback(
           async (event) => {
             event?.preventDefault();
-            if (!email || !password) return;
+
+            const trimmedIdentifier = email.trim();
+            if (!trimmedIdentifier || !password) return;
 
             try {
               setAuthError("");
+
+              let authEmail;
+              if (trimmedIdentifier.includes("@")) {
+                if (trimmedIdentifier.endsWith("@users.eloy")) {
+                  authEmail = trimmedIdentifier;
+                } else {
+                  setAuthError(
+                    "Pour vous connecter, utilisez votre nom d'utilisateur choisi lors de l'inscription."
+                  );
+                  return;
+                }
+              } else {
+                authEmail = buildAuthEmailFromUsername(trimmedIdentifier);
+                if (!authEmail) {
+                  setAuthError("Nom d'utilisateur invalide.");
+                  return;
+                }
+              }
+
               const { error } = await supabase.auth.signInWithPassword({
-                email,
+                email: authEmail,
                 password,
               });
               if (error) throw error;
@@ -2091,6 +2140,95 @@
             }
           },
           [email, password]
+        );
+
+        const handleSignUp = useCallback(
+          async (event) => {
+            event?.preventDefault();
+            setRegisterError("");
+            setRegisterMessage("");
+
+            const trimmedUsername = registerUsername.trim();
+
+            if (!trimmedUsername) {
+              setRegisterError(
+                "Merci d'indiquer un nom d'utilisateur pour la connexion."
+              );
+              return;
+            }
+
+            const normalizedUsername = sanitizeUsername(trimmedUsername);
+            if (!normalizedUsername) {
+              setRegisterError(
+                "Le nom d'utilisateur ne doit contenir que des lettres, chiffres ou caractères ._-"
+              );
+              return;
+            }
+
+            if (!registerPassword) {
+              setRegisterError("Merci d'indiquer un mot de passe.");
+              return;
+            }
+
+            const authEmail = buildAuthEmailFromUsername(trimmedUsername);
+            if (!authEmail) {
+              setRegisterError(
+                "Impossible de générer un identifiant de connexion pour ce nom d'utilisateur."
+              );
+              return;
+            }
+
+            try {
+              setIsCreatingAccount(true);
+              const passwordValue = registerPassword;
+              const { error } = await supabase.auth.signUp({
+                email: authEmail,
+                password: registerPassword,
+                options: {
+                  data: {
+                    username: trimmedUsername,
+                    normalized_username: normalizedUsername,
+                    auth_email: authEmail,
+                  },
+                },
+              });
+
+              if (error) throw error;
+
+              const identifierMessage =
+                trimmedUsername === normalizedUsername
+                  ? `"${trimmedUsername}"`
+                  : `"${trimmedUsername}" (identifiant utilisé : "${normalizedUsername}")`;
+
+              setRegisterMessage(
+                `Compte créé avec succès ! Vous pourrez désormais vous connecter avec le nom d'utilisateur ${identifierMessage}.`
+              );
+              setEmail(trimmedUsername);
+              setPassword(passwordValue);
+              setRegisterUsername("");
+              setRegisterPassword("");
+              setIsRegisterPasswordVisible(false);
+              setIsLoginPasswordVisible(false);
+            } catch (err) {
+              console.error("❌ Erreur lors de la création du compte :", err);
+              const message = String(err?.message || "");
+              if (
+                message.toLowerCase().includes("duplicate") ||
+                message.toLowerCase().includes("already")
+              ) {
+                setRegisterError(
+                  "Ce nom d'utilisateur est déjà utilisé. Merci d'en choisir un autre."
+                );
+              } else {
+                setRegisterError(
+                  message || "Impossible de créer le compte utilisateur."
+                );
+              }
+            } finally {
+              setIsCreatingAccount(false);
+            }
+          },
+          [registerPassword, registerUsername]
         );
 
         /********************************************
@@ -2110,50 +2248,175 @@
                 <div className="flex items-center gap-3">
                   <UnlockIcon className="text-indigo-600" size={32} />
                   <div>
-                    <h1 className="text-2xl font-bold text-gray-800">Connexion Supabase</h1>
+                    <h1 className="text-2xl font-bold text-gray-800">
+                      {isRegistering ? "Créer un compte" : "Connexion Supabase"}
+                    </h1>
                     <p className="text-sm text-gray-500">
-                      Connectez-vous pour accéder aux données transporteurs.
+                      {isRegistering
+                        ? "Choisissez un nom d'utilisateur (utilisé pour la connexion) et un mot de passe."
+                        : "Connectez-vous avec votre nom d'utilisateur et votre mot de passe pour accéder aux données transporteurs."}
                     </p>
                   </div>
                 </div>
-                {authError && (
-                  <div className="bg-red-50 text-red-600 text-sm p-3 rounded">
-                    {authError}
-                  </div>
+
+                {isRegistering ? (
+                  <>
+                    {registerError && (
+                      <div className="bg-red-50 text-red-600 text-sm p-3 rounded">
+                        {registerError}
+                      </div>
+                    )}
+                    {registerMessage && (
+                      <div className="bg-green-50 text-green-700 text-sm p-3 rounded">
+                        {registerMessage}
+                      </div>
+                    )}
+                    <form className="space-y-4" onSubmit={handleSignUp}>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Nom d'utilisateur
+                        </label>
+                        <input
+                          type="text"
+                          value={registerUsername}
+                          onChange={(e) => setRegisterUsername(e.target.value)}
+                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                          placeholder="Votre identifiant"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Mot de passe
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={isRegisterPasswordVisible ? "text" : "password"}
+                            value={registerPassword}
+                            onChange={(e) => setRegisterPassword(e.target.value)}
+                            className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500 pr-12"
+                            placeholder="••••••••"
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setIsRegisterPasswordVisible((visible) => !visible)
+                            }
+                            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                            aria-label={
+                              isRegisterPasswordVisible
+                                ? "Masquer le mot de passe"
+                                : "Afficher le mot de passe"
+                            }
+                          >
+                            {isRegisterPasswordVisible ? "Masquer" : "Afficher"}
+                          </button>
+                        </div>
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+                        disabled={isCreatingAccount}
+                      >
+                        {isCreatingAccount ? "Création en cours..." : "Créer le compte"}
+                      </button>
+                    </form>
+                    <p className="text-sm text-gray-600 text-center">
+                      Déjà un compte ?
+                      <button
+                        type="button"
+                        className="text-indigo-600 font-medium ml-1"
+                        onClick={() => {
+                          setIsRegistering(false);
+                          setRegisterError("");
+                          setRegisterMessage("");
+                          setIsRegisterPasswordVisible(false);
+                          setIsLoginPasswordVisible(false);
+                        }}
+                      >
+                        Se connecter
+                      </button>
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    {authError && (
+                      <div className="bg-red-50 text-red-600 text-sm p-3 rounded">
+                        {authError}
+                      </div>
+                    )}
+                    <form className="space-y-4" onSubmit={handleLogin}>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Nom d'utilisateur
+                        </label>
+                        <input
+                          type="text"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                          placeholder="Votre nom d'utilisateur"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Mot de passe
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={isLoginPasswordVisible ? "text" : "password"}
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500 pr-12"
+                            placeholder="••••••••"
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setIsLoginPasswordVisible((visible) => !visible)
+                            }
+                            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                            aria-label={
+                              isLoginPasswordVisible
+                                ? "Masquer le mot de passe"
+                                : "Afficher le mot de passe"
+                            }
+                          >
+                            {isLoginPasswordVisible ? "Masquer" : "Afficher"}
+                          </button>
+                        </div>
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+                        disabled={!email || !password}
+                      >
+                        Se connecter
+                      </button>
+                      <p className="text-xs text-gray-500 text-center">
+                        Connectez-vous avec le nom d'utilisateur défini lors de la création du compte.
+                      </p>
+                    </form>
+                    <p className="text-sm text-gray-600 text-center">
+                      Pas encore de compte ?
+                      <button
+                        type="button"
+                        className="text-indigo-600 font-medium ml-1"
+                        onClick={() => {
+                          setIsRegistering(true);
+                          setAuthError("");
+                          setIsRegisterPasswordVisible(false);
+                          setIsLoginPasswordVisible(false);
+                        }}
+                      >
+                        Créer un compte
+                      </button>
+                    </p>
+                  </>
                 )}
-                <form className="space-y-4" onSubmit={handleLogin}>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Email
-                    </label>
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
-                      placeholder="vous@exemple.com"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Mot de passe
-                    </label>
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
-                      placeholder="••••••••"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
-                    disabled={!email || !password}
-                  >
-                    Se connecter
-                  </button>
-                </form>
               </div>
             </div>
           );
