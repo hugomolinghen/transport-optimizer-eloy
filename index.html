@@ -73,6 +73,26 @@
 
       const ADMIN_EMAILS = ["admin@eloy", "admin@eloy.com"];
 
+      const sanitizeUsername = (username) => {
+        if (!username) return "";
+
+        return username
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-zA-Z0-9._-]+/g, "-")
+          .toLowerCase()
+          .replace(/-+/g, "-")
+          .replace(/^-|-$/g, "");
+      };
+
+      const buildAuthEmailFromUsername = (username) => {
+        const sanitized = sanitizeUsername(username);
+        if (!sanitized) {
+          return "";
+        }
+        return `${sanitized}@users.eloy`;
+      };
+
       const normalizeDepartmentCode = (value) => {
         if (value === null || value === undefined) {
           return "";
@@ -2083,12 +2103,33 @@
         const handleLogin = useCallback(
           async (event) => {
             event?.preventDefault();
-            if (!email || !password) return;
+
+            const trimmedIdentifier = email.trim();
+            if (!trimmedIdentifier || !password) return;
 
             try {
               setAuthError("");
+
+              let authEmail;
+              if (trimmedIdentifier.includes("@")) {
+                if (trimmedIdentifier.endsWith("@users.eloy")) {
+                  authEmail = trimmedIdentifier;
+                } else {
+                  setAuthError(
+                    "Pour vous connecter, utilisez votre nom d'utilisateur choisi lors de l'inscription."
+                  );
+                  return;
+                }
+              } else {
+                authEmail = buildAuthEmailFromUsername(trimmedIdentifier);
+                if (!authEmail) {
+                  setAuthError("Nom d'utilisateur invalide.");
+                  return;
+                }
+              }
+
               const { error } = await supabase.auth.signInWithPassword({
-                email,
+                email: authEmail,
                 password,
               });
               if (error) throw error;
@@ -2123,8 +2164,24 @@
               return;
             }
 
+            const normalizedUsername = sanitizeUsername(trimmedUsername);
+            if (!normalizedUsername) {
+              setRegisterError(
+                "Le nom d'utilisateur ne doit contenir que des lettres, chiffres ou caractères ._-"
+              );
+              return;
+            }
+
             if (!registerPassword) {
               setRegisterError("Merci d'indiquer un mot de passe.");
+              return;
+            }
+
+            const authEmail = buildAuthEmailFromUsername(trimmedUsername);
+            if (!authEmail) {
+              setRegisterError(
+                "Impossible de générer un identifiant de connexion pour ce nom d'utilisateur."
+              );
               return;
             }
 
@@ -2132,30 +2189,48 @@
               setIsCreatingAccount(true);
               const passwordValue = registerPassword;
               const { error } = await supabase.auth.signUp({
-                email: trimmedEmail,
+                email: authEmail,
                 password: registerPassword,
                 options: {
                   data: {
                     username: trimmedUsername,
+                    normalized_username: normalizedUsername,
+                    fake_email: trimmedEmail,
+                    auth_email: authEmail,
                   },
                 },
               });
 
               if (error) throw error;
 
+              const identifierMessage =
+                trimmedUsername === normalizedUsername
+                  ? `"${trimmedUsername}"`
+                  : `"${trimmedUsername}" (identifiant utilisé : "${normalizedUsername}")`;
+
               setRegisterMessage(
-                "Compte créé avec succès ! Vous pouvez maintenant vous connecter."
+                `Compte créé avec succès ! Vous pourrez désormais vous connecter avec le nom d'utilisateur ${identifierMessage}.`
               );
-              setEmail(trimmedEmail);
+              setEmail(trimmedUsername);
               setPassword(passwordValue);
               setRegisterEmail("");
               setRegisterUsername("");
               setRegisterPassword("");
             } catch (err) {
               console.error("❌ Erreur lors de la création du compte :", err);
-              setRegisterError(
-                err.message || "Impossible de créer le compte utilisateur."
-              );
+              const message = String(err?.message || "");
+              if (
+                message.toLowerCase().includes("duplicate") ||
+                message.toLowerCase().includes("already")
+              ) {
+                setRegisterError(
+                  "Ce nom d'utilisateur est déjà utilisé. Merci d'en choisir un autre."
+                );
+              } else {
+                setRegisterError(
+                  message || "Impossible de créer le compte utilisateur."
+                );
+              }
             } finally {
               setIsCreatingAccount(false);
             }
@@ -2185,8 +2260,8 @@
                     </h1>
                     <p className="text-sm text-gray-500">
                       {isRegistering
-                        ? "Renseignez un email factice, un nom d'utilisateur et un mot de passe."
-                        : "Connectez-vous pour accéder aux données transporteurs."}
+                        ? "Renseignez un email factice, un nom d'utilisateur (utilisé pour la connexion) et un mot de passe."
+                        : "Connectez-vous avec votre nom d'utilisateur et votre mot de passe pour accéder aux données transporteurs."}
                     </p>
                   </div>
                 </div>
@@ -2276,14 +2351,14 @@
                     <form className="space-y-4" onSubmit={handleLogin}>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Email de connexion
+                          Nom d'utilisateur
                         </label>
                         <input
-                          type="email"
+                          type="text"
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
-                          placeholder="vous@exemple.com"
+                          placeholder="Votre nom d'utilisateur"
                           required
                         />
                       </div>
@@ -2308,7 +2383,7 @@
                         Se connecter
                       </button>
                       <p className="text-xs text-gray-500 text-center">
-                        Utilisez la même adresse email factice que celle saisie lors de la création du compte.
+                        Connectez-vous avec le nom d'utilisateur défini lors de la création du compte.
                       </p>
                     </form>
                     <p className="text-sm text-gray-600 text-center">
