@@ -1960,11 +1960,19 @@
 
             if (transporter.hasBreakOfCharge) {
               const breakCost = Number(transporter.breakOfChargeCost);
+              const breaksCount = Math.max(0, optimalRoute.length - 1);
+
               if (!Number.isFinite(breakCost) || breakCost < 0) {
                 continue;
               }
-              totalCost += breakCost;
-              details.push(`+ Rupture de charge : ${breakCost.toFixed(2)}€`);
+
+              if (breaksCount > 0 && breakCost > 0) {
+                const totalBreakCost = breakCost * breaksCount;
+                totalCost += totalBreakCost;
+                details.push(
+                  `+ Rupture de charge (${breaksCount} × ${breakCost.toFixed(2)}€) : ${totalBreakCost.toFixed(2)}€`
+                );
+              }
             }
 
             rankedResults.push({ transporter, totalCost, details });
