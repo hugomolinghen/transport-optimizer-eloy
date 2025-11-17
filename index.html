@@ -1975,7 +1975,8 @@
               return;
             }
 
-            const coordsList = optimalRoute.map((dept) => {
+            const baseCoords = { lat: 50.5333, lon: 5.6203 };
+            const deptCoords = optimalRoute.map((dept) => {
               if (
                 Number.isFinite(dept?.latitude) &&
                 Number.isFinite(dept?.longitude)
@@ -1985,7 +1986,7 @@
               return null;
             });
 
-            if (coordsList.some((item) => item === null)) {
+            if (deptCoords.some((item) => item === null)) {
               if (!isActive) return;
               setRouteMetrics({
                 totalDistanceKm: 0,
@@ -1997,17 +1998,7 @@
               return;
             }
 
-            if (optimalRoute.length === 1) {
-              const baseDistance = Number(optimalRoute[0]?.km) || 0;
-              if (!isActive) return;
-              setRouteMetrics({
-                totalDistanceKm: baseDistance,
-                detourKm: 0,
-                loading: false,
-                error: "",
-              });
-              return;
-            }
+            const coordsList = [baseCoords, ...deptCoords];
 
             setRouteMetrics((prev) => ({ ...prev, loading: true, error: "" }));
             const cache = routeDistanceCacheRef.current;
@@ -2069,8 +2060,7 @@
                 );
               }
 
-              const startDistanceKm = Number(optimalRoute[0]?.km) || 0;
-              const totalDistanceKm = startDistanceKm + segmentDistanceSum;
+              const totalDistanceKm = segmentDistanceSum;
               const detourKm = Math.max(0, totalDistanceKm - directDistanceKm);
 
               if (!isActive) return;
