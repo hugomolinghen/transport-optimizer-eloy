@@ -1814,12 +1814,32 @@
                   return;
                 }
 
+                const latitudeRaw =
+                  dept.latitude ??
+                  dept.lat ??
+                  dept.lat_geographique ??
+                  dept.lat_geo ??
+                  null;
+                const longitudeRaw =
+                  dept.longitude ??
+                  dept.long ??
+                  dept.lng ??
+                  dept.lon ??
+                  dept.long_geographique ??
+                  dept.long_geo ??
+                  null;
+
+                const latitude = Number(latitudeRaw);
+                const longitude = Number(longitudeRaw);
+
                 if (!deptMap.has(code)) {
                   deptMap.set(code, {
                     id: dept.id ?? code,
                     code,
                     name: dept.name || dept.nom || dept.libelle || "",
                     km: dept.km ?? dept.distance ?? null,
+                    latitude: Number.isFinite(latitude) ? latitude : null,
+                    longitude: Number.isFinite(longitude) ? longitude : null,
                   });
                 }
               });
