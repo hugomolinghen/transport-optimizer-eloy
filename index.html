@@ -2098,18 +2098,18 @@
           const rankedResults = [];
 
           for (const transporter of transporters) {
-            let furthestCost = 0;
+            let furthestCost = null;
             let furthestDeptDetail = "";
             const details = [];
-            let isValid = true;
+            const missingDepartments = [];
 
             for (let idx = 0; idx < optimalRoute.length; idx += 1) {
               const dept = optimalRoute[idx];
               const rate = transporter.rates.find((r) => r.deptId === dept.id);
 
               if (!rate) {
-                isValid = false;
-                break;
+                missingDepartments.push(dept.name);
+                continue;
               }
 
               const rawCost =
@@ -2117,22 +2117,28 @@
               const parsed = parseTariff(rawCost);
 
               if (!parsed.available) {
-                isValid = false;
-                break;
+                missingDepartments.push(dept.name);
+                continue;
               }
 
               details.push(
                 `${idx + 1}. ${dept.name} (${dept.km} km): ${parsed.value.toFixed(2)}€`
               );
 
-              if (parsed.value >= furthestCost) {
+              if (furthestCost === null || parsed.value >= furthestCost) {
                 furthestCost = parsed.value;
                 furthestDeptDetail = `${dept.name} (${dept.km} km)`;
               }
             }
 
-            if (!isValid) {
+            if (furthestCost === null) {
               continue;
+            }
+
+            if (missingDepartments.length) {
+              details.push(
+                `⚠️ Tarifs manquants pour : ${missingDepartments.join(", ")}`
+              );
             }
 
             if (furthestDeptDetail) {
