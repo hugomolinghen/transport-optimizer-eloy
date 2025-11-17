@@ -2012,60 +2012,64 @@
             setRouteMetrics((prev) => ({ ...prev, loading: true, error: "" }));
             const cache = routeDistanceCacheRef.current;
 
-            const fetchSegmentDistance = async (from, to) => {
-              const key = `${from.lon},${from.lat}|${to.lon},${to.lat}`;
-              if (cache.has(key)) {
-                return cache.get(key);
-              }
-
-              const response = await fetch(
-                "https://api.openrouteservice.org/v2/directions/driving-hgv",
-                {
-                  method: "POST",
-                  headers: {
-                    Authorization: OPENROUTESERVICE_API_KEY,
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    coordinates: [
-                      [from.lon, from.lat],
-                      [to.lon, to.lat],
-                    ],
-                  }),
-                }
-              );
-
-              if (!response.ok) {
-                throw new Error("Impossible de calculer le trajet intermédiaire.");
-              }
-
-              const data = await response.json();
-              const distanceMeters =
-                data?.features?.[0]?.properties?.summary?.distance || null;
-              if (!Number.isFinite(distanceMeters)) {
-                throw new Error("Distance manquante dans la réponse OpenRouteService.");
-              }
-
-              const distanceKm = distanceMeters / 1000;
-              cache.set(key, distanceKm);
-              return distanceKm;
-            };
-
             try {
-              let segmentDistanceSum = 0;
-              for (let i = 0; i < coordsList.length - 1; i += 1) {
-                const segmentKm = await fetchSegmentDistance(
-                  coordsList[i],
-                  coordsList[i + 1]
+              const cacheKey = coordsList
+                .map((coord) => `${coord.lon},${coord.lat}`)
+                .join("|");
+
+              let distancesMatrix = cache.get(cacheKey) || null;
+
+              if (!distancesMatrix) {
+                const response = await fetch(
+                  "https://api.openrouteservice.org/v2/matrix/driving-hgv",
+                  {
+                    method: "POST",
+                    headers: {
+                      Authorization: OPENROUTESERVICE_API_KEY,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      locations: coordsList.map((coord) => [coord.lon, coord.lat]),
+                      metrics: ["distance"],
+                      units: "km",
+                    }),
+                  }
                 );
 
-                if (!isActive) return;
+                if (!response.ok) {
+                  throw new Error("Impossible de calculer la matrice de distances.");
+                }
+
+                const data = await response.json();
+                if (!Array.isArray(data?.distances)) {
+                  throw new Error(
+                    "Distance manquante dans la réponse OpenRouteService (matrix)."
+                  );
+                }
+
+                distancesMatrix = data.distances;
+                cache.set(cacheKey, distancesMatrix);
+              }
+
+              let segmentDistanceSum = 0;
+              for (let i = 0; i < coordsList.length - 1; i += 1) {
+                const segmentKm = distancesMatrix?.[i]?.[i + 1];
+                if (!Number.isFinite(segmentKm)) {
+                  throw new Error(
+                    "Distance manquante dans la matrice pour un trajet intermédiaire."
+                  );
+                }
                 segmentDistanceSum += segmentKm;
               }
 
+              const directDistanceKm = distancesMatrix?.[0]?.[coordsList.length - 1];
+              if (!Number.isFinite(directDistanceKm)) {
+                throw new Error(
+                  "Distance directe manquante dans la matrice OpenRouteService."
+                );
+              }
+
               const startDistanceKm = Number(optimalRoute[0]?.km) || 0;
-              const directDistanceKm =
-                Number(optimalRoute[optimalRoute.length - 1]?.km) || 0;
               const totalDistanceKm = startDistanceKm + segmentDistanceSum;
               const detourKm = Math.max(0, totalDistanceKm - directDistanceKm);
 
