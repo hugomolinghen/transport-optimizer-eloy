@@ -33,6 +33,9 @@
       const SUPABASE_URL = "https://eayhqksztfhyxqhrrnkk.supabase.co";
       const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVheWhxa3N6dGZoeXhxaHJybmtrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxOTQwMzksImV4cCI6MjA3Nzc3MDAzOX0.AsWKSQDa9MDpsmvP6i4LOwBJevQfzUyImzt2_8D-o18"; // ← à remplir
 
+      const OPENROUTESERVICE_API_KEY =
+        "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6Ijc0ODM1ZTU2MzJkYjQyOGY4ZGRjNmFhMjYxN2ZhYjM3IiwiaCI6Im11cm11cjY0In0=";
+
       // ✅ Initialisation sécurisée du client Supabase
       const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -224,6 +227,14 @@
             if (transportersResult.error) throw transportersResult.error;
             if (tariffsResult.error) throw tariffsResult.error;
 
+            const parseCoordinate = (value) => {
+              if (value === null || value === undefined || value === "") {
+                return null;
+              }
+              const numeric = Number(value);
+              return Number.isFinite(numeric) ? numeric : null;
+            };
+
             const departments = (departmentsResult.data || []).map((dept) => ({
               id: dept.id,
               code:
@@ -234,6 +245,20 @@
                 "",
               name: dept.name || dept.nom || dept.libelle || "",
               km: dept.km ?? dept.distance ?? null,
+              latitude:
+                parseCoordinate(dept.latitude) ||
+                parseCoordinate(dept.lat) ||
+                parseCoordinate(dept.lat_dd) ||
+                parseCoordinate(dept.coord_latitude) ||
+                null,
+              longitude:
+                parseCoordinate(dept.longitude) ||
+                parseCoordinate(dept.lon) ||
+                parseCoordinate(dept.lng) ||
+                parseCoordinate(dept.long) ||
+                parseCoordinate(dept.long_dd) ||
+                parseCoordinate(dept.coord_longitude) ||
+                null,
             }));
 
             const transporters = (transportersResult.data || []).map((transporter) => {
@@ -1615,6 +1640,12 @@
         const [reasons, setReasons] = useState({});
         const [validationError, setValidationError] = useState("");
         const [validationMessage, setValidationMessage] = useState("");
+        const [routeMetrics, setRouteMetrics] = useState({
+          totalDistanceKm: 0,
+          detourKm: 0,
+          loading: false,
+          error: "",
+        });
         const resultsRef = useRef(null);
         const [departmentSearch, setDepartmentSearch] = useState("");
         const [dataReloadFlag, setDataReloadFlag] = useState(0);
@@ -1783,12 +1814,32 @@
                   return;
                 }
 
+                const latitudeRaw =
+                  dept.latitude ??
+                  dept.lat ??
+                  dept.lat_geographique ??
+                  dept.lat_geo ??
+                  null;
+                const longitudeRaw =
+                  dept.longitude ??
+                  dept.long ??
+                  dept.lng ??
+                  dept.lon ??
+                  dept.long_geographique ??
+                  dept.long_geo ??
+                  null;
+
+                const latitude = Number(latitudeRaw);
+                const longitude = Number(longitudeRaw);
+
                 if (!deptMap.has(code)) {
                   deptMap.set(code, {
                     id: dept.id ?? code,
                     code,
                     name: dept.name || dept.nom || dept.libelle || "",
                     km: dept.km ?? dept.distance ?? null,
+                    latitude: Number.isFinite(latitude) ? latitude : null,
+                    longitude: Number.isFinite(longitude) ? longitude : null,
                   });
                 }
               });
@@ -1819,6 +1870,12 @@
                   transporter.breakOfChargeCost ??
                   transporter.break_cost ??
                   null;
+                const kmFeeRaw =
+                  transporter.frais_km ??
+                  transporter.fraisKm ??
+                  transporter.cout_km ??
+                  transporter.coutKm ??
+                  null;
 
                 transportersMap.set(transporter.id, {
                   id: transporter.id,
@@ -1832,6 +1889,10 @@
                     breakOfChargeCostRaw !== undefined &&
                     breakOfChargeCostRaw !== null
                       ? Number(breakOfChargeCostRaw)
+                      : 0,
+                  kmFee:
+                    kmFeeRaw !== undefined && kmFeeRaw !== null
+                      ? Number(kmFeeRaw)
                       : 0,
                   rates: [],
                 });
@@ -1907,24 +1968,158 @@
           });
         }, [departmentSearch, departments]);
 
+        const routeDistanceCacheRef = useRef(new Map());
+
+        useEffect(() => {
+          let isActive = true;
+
+          const computeRouteMetrics = async () => {
+            if (!optimalRoute.length) {
+              if (!isActive) return;
+              setRouteMetrics({
+                totalDistanceKm: 0,
+                detourKm: 0,
+                loading: false,
+                error: "",
+              });
+              return;
+            }
+
+            const baseCoords = { lat: 50.5333, lon: 5.6203 };
+            const deptCoords = optimalRoute.map((dept) => {
+              if (
+                Number.isFinite(dept?.latitude) &&
+                Number.isFinite(dept?.longitude)
+              ) {
+                return { lat: Number(dept.latitude), lon: Number(dept.longitude) };
+              }
+              return null;
+            });
+
+            if (deptCoords.some((item) => item === null)) {
+              if (!isActive) return;
+              setRouteMetrics({
+                totalDistanceKm: 0,
+                detourKm: 0,
+                loading: false,
+                error:
+                  "Coordonnées manquantes pour au moins un département sélectionné.",
+              });
+              return;
+            }
+
+            const coordsList = [baseCoords, ...deptCoords];
+
+            setRouteMetrics((prev) => ({ ...prev, loading: true, error: "" }));
+            const cache = routeDistanceCacheRef.current;
+
+            try {
+              const cacheKey = coordsList
+                .map((coord) => `${coord.lon},${coord.lat}`)
+                .join("|");
+
+              let distancesMatrix = cache.get(cacheKey) || null;
+
+              if (!distancesMatrix) {
+                const response = await fetch(
+                  "https://api.openrouteservice.org/v2/matrix/driving-hgv",
+                  {
+                    method: "POST",
+                    headers: {
+                      Authorization: OPENROUTESERVICE_API_KEY,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      locations: coordsList.map((coord) => [coord.lon, coord.lat]),
+                      metrics: ["distance"],
+                      units: "km",
+                    }),
+                  }
+                );
+
+                if (!response.ok) {
+                  throw new Error("Impossible de calculer la matrice de distances.");
+                }
+
+                const data = await response.json();
+                if (!Array.isArray(data?.distances)) {
+                  throw new Error(
+                    "Distance manquante dans la réponse OpenRouteService (matrix)."
+                  );
+                }
+
+                distancesMatrix = data.distances;
+                cache.set(cacheKey, distancesMatrix);
+              }
+
+              let segmentDistanceSum = 0;
+              for (let i = 0; i < coordsList.length - 1; i += 1) {
+                const segmentKm = distancesMatrix?.[i]?.[i + 1];
+                if (!Number.isFinite(segmentKm)) {
+                  throw new Error(
+                    "Distance manquante dans la matrice pour un trajet intermédiaire."
+                  );
+                }
+                segmentDistanceSum += segmentKm;
+              }
+
+              const directDistanceKm = distancesMatrix?.[0]?.[coordsList.length - 1];
+              if (!Number.isFinite(directDistanceKm)) {
+                throw new Error(
+                  "Distance directe manquante dans la matrice OpenRouteService."
+                );
+              }
+
+              const totalDistanceKm = segmentDistanceSum;
+              const detourKm = Math.max(0, totalDistanceKm - directDistanceKm);
+
+              if (!isActive) return;
+              setRouteMetrics({
+                totalDistanceKm,
+                detourKm,
+                loading: false,
+                error: "",
+              });
+            } catch (err) {
+              console.error("❌ Erreur OpenRouteService :", err);
+              if (!isActive) return;
+              setRouteMetrics({
+                totalDistanceKm: 0,
+                detourKm: 0,
+                loading: false,
+                error:
+                  err?.message ||
+                  "Impossible de calculer le détour avec OpenRouteService.",
+              });
+            }
+          };
+
+          computeRouteMetrics();
+
+          return () => {
+            isActive = false;
+          };
+        }, [optimalRoute]);
+
         const bestTransporters = useMemo(() => {
           if (!selectedDepts.length || !truckType || !transporters.length) return [];
+          if (routeMetrics.loading || routeMetrics.error) return [];
 
           const rankedResults = [];
 
           for (const transporter of transporters) {
-            let furthestCost = 0;
+            let furthestCost = null;
             let furthestDeptDetail = "";
             const details = [];
-            let isValid = true;
+            const missingDepartments = [];
 
             for (let idx = 0; idx < optimalRoute.length; idx += 1) {
               const dept = optimalRoute[idx];
               const rate = transporter.rates.find((r) => r.deptId === dept.id);
 
               if (!rate) {
-                isValid = false;
-                break;
+                missingDepartments.push(dept.name);
+                continue;
               }
 
               const rawCost =
@@ -1932,22 +2127,28 @@
               const parsed = parseTariff(rawCost);
 
               if (!parsed.available) {
-                isValid = false;
-                break;
+                missingDepartments.push(dept.name);
+                continue;
               }
 
               details.push(
                 `${idx + 1}. ${dept.name} (${dept.km} km): ${parsed.value.toFixed(2)}€`
               );
 
-              if (parsed.value >= furthestCost) {
+              if (furthestCost === null || parsed.value >= furthestCost) {
                 furthestCost = parsed.value;
                 furthestDeptDetail = `${dept.name} (${dept.km} km)`;
               }
             }
 
-            if (!isValid) {
+            if (furthestCost === null) {
               continue;
+            }
+
+            if (missingDepartments.length) {
+              details.push(
+                `⚠️ Tarifs manquants pour : ${missingDepartments.join(", ")}`
+              );
             }
 
             if (furthestDeptDetail) {
@@ -1956,22 +2157,49 @@
               );
             }
 
+            if (routeMetrics.totalDistanceKm > 0) {
+              details.push(
+                `Trajet estimé : ${routeMetrics.totalDistanceKm.toFixed(2)} km (détour : ${routeMetrics.detourKm.toFixed(2)} km)`
+              );
+            }
+
             let totalCost = furthestCost;
 
             if (transporter.hasBreakOfCharge) {
               const breakCost = Number(transporter.breakOfChargeCost);
+              const breaksCount = Math.max(0, optimalRoute.length - 1);
+
               if (!Number.isFinite(breakCost) || breakCost < 0) {
                 continue;
               }
-              totalCost += breakCost;
-              details.push(`+ Rupture de charge : ${breakCost.toFixed(2)}€`);
+
+              if (breaksCount > 0 && breakCost > 0) {
+                const totalBreakCost = breakCost * breaksCount;
+                totalCost += totalBreakCost;
+                details.push(
+                  `+ Rupture de charge (${breaksCount} × ${breakCost.toFixed(2)}€) : ${totalBreakCost.toFixed(2)}€`
+                );
+              }
+            }
+
+            const kmFee = Number(transporter.kmFee);
+            if (routeMetrics.detourKm > 0) {
+              if (!Number.isFinite(kmFee) || kmFee < 0) {
+                continue;
+              }
+
+              const detourCost = routeMetrics.detourKm * kmFee;
+              totalCost += detourCost;
+              details.push(
+                `+ Détour (${routeMetrics.detourKm.toFixed(2)} km × ${kmFee.toFixed(2)}€) : ${detourCost.toFixed(2)}€`
+              );
             }
 
             rankedResults.push({ transporter, totalCost, details });
           }
 
           return rankedResults.sort((a, b) => a.totalCost - b.totalCost);
-        }, [optimalRoute, transporters, truckType]);
+        }, [optimalRoute, routeMetrics, transporters, truckType]);
 
         useEffect(() => {
           const topLength = Math.min(3, bestTransporters.length);
@@ -2786,12 +3014,32 @@
                         <div className="font-semibold">
                           {dept.code} - {dept.name}
                         </div>
-                        <div className="text-xs text-gray-500">{dept.km} km depuis Sprimont</div>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
+                      <div className="text-xs text-gray-500">{dept.km} km depuis Sprimont</div>
+                    </div>
+                  </li>
+                ))}
+              </ol>
               )}
+
+              {routeMetrics.loading && (
+                <p className="mt-3 text-sm text-indigo-600">
+                  Calcul du détour en cours via OpenRouteService...
+                </p>
+              )}
+
+              {routeMetrics.error && (
+                <p className="mt-3 text-sm text-red-600">
+                  {routeMetrics.error}
+                </p>
+              )}
+
+              {!routeMetrics.error && !routeMetrics.loading &&
+                routeMetrics.totalDistanceKm > 0 && (
+                  <p className="mt-3 text-sm text-gray-700">
+                    Trajet estimé : {routeMetrics.totalDistanceKm.toFixed(2)} km (détour
+                    : {routeMetrics.detourKm.toFixed(2)} km)
+                  </p>
+                )}
             </div>
 
             {/* ======= SECTION TRANSPORTEURS ======= */}
