@@ -247,6 +247,18 @@
                 transporter.breakOfChargeCost ??
                 transporter.break_cost ??
                 null;
+              const authorizedKmRaw =
+                transporter.km_autorise ??
+                transporter.kmAutorise ??
+                transporter.km_autorized ??
+                transporter.authorized_km ??
+                null;
+              const kmFeeRaw =
+                transporter.frais_km ??
+                transporter.fraisKm ??
+                transporter.cout_km ??
+                transporter.coutKm ??
+                null;
 
               return {
                 id: transporter.id,
@@ -256,6 +268,14 @@
                   breakOfChargeCostRaw !== undefined && breakOfChargeCostRaw !== null
                     ? Number(breakOfChargeCostRaw)
                     : 0,
+                authorizedKm:
+                  authorizedKmRaw !== undefined && authorizedKmRaw !== null
+                    ? Number(authorizedKmRaw)
+                    : null,
+                kmFee:
+                  kmFeeRaw !== undefined && kmFeeRaw !== null
+                    ? Number(kmFeeRaw)
+                    : null,
               };
             });
 
@@ -460,6 +480,8 @@
                 breakOfChargeCost: String(
                   item.breakOfChargeCost ?? ""
                 ),
+                authorizedKm: String(item.authorizedKm ?? ""),
+                kmFee: String(item.kmFee ?? ""),
               }))
             );
           } catch (err) {
@@ -580,11 +602,29 @@
             : hasColumn("breakOfChargeCost")
             ? "breakOfChargeCost"
             : "break_of_charge_cost";
+          const authorizedKmKey = hasColumn("km_autorise")
+            ? "km_autorise"
+            : hasColumn("kmAutorise")
+            ? "kmAutorise"
+            : hasColumn("authorized_km")
+            ? "authorized_km"
+            : "km_autorise";
+          const kmFeeKey = hasColumn("frais_km")
+            ? "frais_km"
+            : hasColumn("fraisKm")
+            ? "fraisKm"
+            : hasColumn("cout_km")
+            ? "cout_km"
+            : hasColumn("coutKm")
+            ? "coutKm"
+            : "frais_km";
 
           return {
             name: nameKey,
             breakFlag: breakFlagKey,
             breakCost: breakCostKey,
+            authorizedKm: authorizedKmKey,
+            kmFee: kmFeeKey,
           };
         }, [transporterSourceRows]);
 
@@ -654,6 +694,8 @@
               name: "",
               hasBreakOfCharge: false,
               breakOfChargeCost: "",
+              authorizedKm: "",
+              kmFee: "",
             },
           ]);
         };
@@ -832,6 +874,9 @@
                 breakCost = parsed !== null ? parsed : 0;
               }
 
+              const authorizedKm = normalizeNumber(row.authorizedKm);
+              const kmFee = normalizeNumber(row.kmFee);
+
               const baseRecord =
                 (row.id !== undefined && row.id !== null && transporterSourceMap.get(row.id)) ||
                 null;
@@ -843,6 +888,10 @@
               payloadRow[transporterColumnNames.name] = row.name.trim();
               payloadRow[transporterColumnNames.breakFlag] = row.hasBreakOfCharge;
               payloadRow[transporterColumnNames.breakCost] = breakCost;
+              payloadRow[transporterColumnNames.authorizedKm] =
+                authorizedKm !== null ? authorizedKm : null;
+              payloadRow[transporterColumnNames.kmFee] =
+                kmFee !== null ? kmFee : null;
 
               return payloadRow;
             });
@@ -1266,6 +1315,12 @@
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">
                       Coût rupture (€)
                     </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      KM autorisés
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Frais km (€)
+                    </th>
                     <th className="px-3 py-2 text-right font-semibold text-gray-700">
                       Actions
                     </th>
@@ -1323,6 +1378,36 @@
                               ? "bg-white"
                               : "bg-gray-100 text-gray-400"
                           }`}
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={row.authorizedKm ?? ""}
+                          onChange={(event) =>
+                            handleTransporterFieldChange(
+                              index,
+                              "authorizedKm",
+                              event.target.value
+                            )
+                          }
+                          className="w-28 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={row.kmFee ?? ""}
+                          onChange={(event) =>
+                            handleTransporterFieldChange(
+                              index,
+                              "kmFee",
+                              event.target.value
+                            )
+                          }
+                          className="w-28 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                           placeholder="0"
                         />
                       </td>
