@@ -1759,70 +1759,111 @@
               setLoading(true);
               setError("");
 
-              // 🔹 Requête principale : lecture directe de la vue
-              const { data, error } = await supabase
-                .from("v_tarifs_complets")
-                .select(
-                  "transporteur_id, transporteur_nom, break_of_charge, break_of_charge_cost, departement_code, departement_name, km, prix_bache, prix_plateau"
-                );
+              const [departmentsResult, transportersResult, tariffsResult] =
+                await Promise.all([
+                  supabase.from("departements").select("*"),
+                  supabase.from("transporteurs").select("*"),
+                  supabase.from("tarifs_transporteurs").select("*"),
+                ]);
 
-              if (error) throw error;
+              if (departmentsResult.error) throw departmentsResult.error;
+              if (transportersResult.error) throw transportersResult.error;
+              if (tariffsResult.error) throw tariffsResult.error;
 
-              console.log("✅ Données récupérées :", data);
+              const deptMap = new Map();
+              (departmentsResult.data || []).forEach((dept) => {
+                const code =
+                  dept.code ||
+                  dept.departement_code ||
+                  dept.department_code ||
+                  dept.code_insee ||
+                  "";
 
-              if (!data || data.length === 0) {
+                if (!code) {
+                  return;
+                }
+
+                if (!deptMap.has(code)) {
+                  deptMap.set(code, {
+                    id: dept.id ?? code,
+                    code,
+                    name: dept.name || dept.nom || dept.libelle || "",
+                    km: dept.km ?? dept.distance ?? null,
+                  });
+                }
+              });
+
+              if (!deptMap.size) {
                 if (!isActive) return;
-                setError("Aucune donnée trouvée dans la vue v_tarifs_complets.");
+                setError(
+                  "Aucun département disponible. Merci de vérifier les données Supabase.",
+                );
                 setDepartments([]);
                 setTransporters([]);
                 return;
               }
 
-              // 🧩 Construction des départements uniques
-              const deptMap = new Map();
-              data.forEach((row, index) => {
-                if (!deptMap.has(row.departement_code)) {
-                  deptMap.set(row.departement_code, {
-                    id: index + 1,
-                    code: row.departement_code,
-                    name: row.departement_name,
-                    km: row.km,
-                  });
-                }
-              });
               const deptList = Array.from(deptMap.values()).sort((a, b) =>
                 a.code.localeCompare(b.code, "fr", { numeric: true })
               );
 
-              // 🧩 Construction des transporteurs
-              const transpMap = new Map();
-              data.forEach((row) => {
-                if (!transpMap.has(row.transporteur_nom)) {
-                  transpMap.set(row.transporteur_nom, {
-                    id: row.transporteur_id,
-                    name: row.transporteur_nom,
-                    hasBreakOfCharge: row.break_of_charge || false,
-                    breakOfChargeCost: row.break_of_charge_cost || 0,
-                    rates: [],
-                  });
+              const transportersMap = new Map();
+              (transportersResult.data || []).forEach((transporter) => {
+                const breakOfChargeRaw =
+                  transporter.break_of_charge ??
+                  transporter.has_break_of_charge ??
+                  transporter.hasBreakOfCharge ??
+                  false;
+                const breakOfChargeCostRaw =
+                  transporter.break_of_charge_cost ??
+                  transporter.breakOfChargeCost ??
+                  transporter.break_cost ??
+                  null;
+
+                transportersMap.set(transporter.id, {
+                  id: transporter.id,
+                  name:
+                    transporter.nom ||
+                    transporter.name ||
+                    transporter.libelle ||
+                    "",
+                  hasBreakOfCharge: Boolean(breakOfChargeRaw),
+                  breakOfChargeCost:
+                    breakOfChargeCostRaw !== undefined &&
+                    breakOfChargeCostRaw !== null
+                      ? Number(breakOfChargeCostRaw)
+                      : 0,
+                  rates: [],
+                });
+              });
+
+              (tariffsResult.data || []).forEach((tariff) => {
+                const transporter = transportersMap.get(tariff.transporteur_id);
+                if (!transporter) {
+                  return;
                 }
-                const transporter = transpMap.get(row.transporteur_nom);
-                const dept = deptMap.get(row.departement_code);
-                if (dept) {
-                  transporter.rates.push({
-                    deptId: dept.id,
-                    departmentCode: dept.code,
-                    tarpsCost: row.prix_bache,
-                    flatbedCost: row.prix_plateau,
-                    kmFromSprimont: row.km,
-                  });
+
+                const deptCode =
+                  tariff.departement_code || tariff.department_code || "";
+                const dept = deptMap.get(deptCode);
+
+                if (!dept) {
+                  return;
                 }
+
+                transporter.rates.push({
+                  deptId: dept.id,
+                  departmentCode: dept.code,
+                  kmFromSprimont: dept.km,
+                  tarpsCost: tariff.prix_bache,
+                  flatbedCost: tariff.prix_plateau,
+                });
               });
 
               if (!isActive) return;
 
               setDepartments(deptList);
-              setTransporters(Array.from(transpMap.values()));
+              setTransporters(Array.from(transportersMap.values()));
             } catch (err) {
               console.error("❌ Erreur Supabase :", err);
               if (isActive) setError(err.message || "Erreur inconnue");
