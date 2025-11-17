@@ -247,6 +247,18 @@
                 transporter.breakOfChargeCost ??
                 transporter.break_cost ??
                 null;
+              const authorizedKmRaw =
+                transporter.km_autorise ??
+                transporter.kmAutorise ??
+                transporter.km_autorized ??
+                transporter.authorized_km ??
+                null;
+              const kmFeeRaw =
+                transporter.frais_km ??
+                transporter.fraisKm ??
+                transporter.cout_km ??
+                transporter.coutKm ??
+                null;
 
               return {
                 id: transporter.id,
@@ -256,6 +268,14 @@
                   breakOfChargeCostRaw !== undefined && breakOfChargeCostRaw !== null
                     ? Number(breakOfChargeCostRaw)
                     : 0,
+                authorizedKm:
+                  authorizedKmRaw !== undefined && authorizedKmRaw !== null
+                    ? Number(authorizedKmRaw)
+                    : null,
+                kmFee:
+                  kmFeeRaw !== undefined && kmFeeRaw !== null
+                    ? Number(kmFeeRaw)
+                    : null,
               };
             });
 
@@ -460,6 +480,8 @@
                 breakOfChargeCost: String(
                   item.breakOfChargeCost ?? ""
                 ),
+                authorizedKm: String(item.authorizedKm ?? ""),
+                kmFee: String(item.kmFee ?? ""),
               }))
             );
           } catch (err) {
@@ -580,11 +602,29 @@
             : hasColumn("breakOfChargeCost")
             ? "breakOfChargeCost"
             : "break_of_charge_cost";
+          const authorizedKmKey = hasColumn("km_autorise")
+            ? "km_autorise"
+            : hasColumn("kmAutorise")
+            ? "kmAutorise"
+            : hasColumn("authorized_km")
+            ? "authorized_km"
+            : "km_autorise";
+          const kmFeeKey = hasColumn("frais_km")
+            ? "frais_km"
+            : hasColumn("fraisKm")
+            ? "fraisKm"
+            : hasColumn("cout_km")
+            ? "cout_km"
+            : hasColumn("coutKm")
+            ? "coutKm"
+            : "frais_km";
 
           return {
             name: nameKey,
             breakFlag: breakFlagKey,
             breakCost: breakCostKey,
+            authorizedKm: authorizedKmKey,
+            kmFee: kmFeeKey,
           };
         }, [transporterSourceRows]);
 
@@ -654,6 +694,8 @@
               name: "",
               hasBreakOfCharge: false,
               breakOfChargeCost: "",
+              authorizedKm: "",
+              kmFee: "",
             },
           ]);
         };
@@ -832,6 +874,9 @@
                 breakCost = parsed !== null ? parsed : 0;
               }
 
+              const authorizedKm = normalizeNumber(row.authorizedKm);
+              const kmFee = normalizeNumber(row.kmFee);
+
               const baseRecord =
                 (row.id !== undefined && row.id !== null && transporterSourceMap.get(row.id)) ||
                 null;
@@ -843,6 +888,10 @@
               payloadRow[transporterColumnNames.name] = row.name.trim();
               payloadRow[transporterColumnNames.breakFlag] = row.hasBreakOfCharge;
               payloadRow[transporterColumnNames.breakCost] = breakCost;
+              payloadRow[transporterColumnNames.authorizedKm] =
+                authorizedKm !== null ? authorizedKm : null;
+              payloadRow[transporterColumnNames.kmFee] =
+                kmFee !== null ? kmFee : null;
 
               return payloadRow;
             });
@@ -1266,6 +1315,12 @@
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">
                       Coût rupture (€)
                     </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      KM autorisés
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">
+                      Frais km (€)
+                    </th>
                     <th className="px-3 py-2 text-right font-semibold text-gray-700">
                       Actions
                     </th>
@@ -1323,6 +1378,36 @@
                               ? "bg-white"
                               : "bg-gray-100 text-gray-400"
                           }`}
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={row.authorizedKm ?? ""}
+                          onChange={(event) =>
+                            handleTransporterFieldChange(
+                              index,
+                              "authorizedKm",
+                              event.target.value
+                            )
+                          }
+                          className="w-28 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={row.kmFee ?? ""}
+                          onChange={(event) =>
+                            handleTransporterFieldChange(
+                              index,
+                              "kmFee",
+                              event.target.value
+                            )
+                          }
+                          className="w-28 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                           placeholder="0"
                         />
                       </td>
@@ -1674,70 +1759,111 @@
               setLoading(true);
               setError("");
 
-              // 🔹 Requête principale : lecture directe de la vue
-              const { data, error } = await supabase
-                .from("v_tarifs_complets")
-                .select(
-                  "transporteur_id, transporteur_nom, break_of_charge, break_of_charge_cost, departement_code, departement_name, km, prix_bache, prix_plateau"
-                );
+              const [departmentsResult, transportersResult, tariffsResult] =
+                await Promise.all([
+                  supabase.from("departements").select("*"),
+                  supabase.from("transporteurs").select("*"),
+                  supabase.from("tarifs_transporteurs").select("*"),
+                ]);
 
-              if (error) throw error;
+              if (departmentsResult.error) throw departmentsResult.error;
+              if (transportersResult.error) throw transportersResult.error;
+              if (tariffsResult.error) throw tariffsResult.error;
 
-              console.log("✅ Données récupérées :", data);
+              const deptMap = new Map();
+              (departmentsResult.data || []).forEach((dept) => {
+                const code =
+                  dept.code ||
+                  dept.departement_code ||
+                  dept.department_code ||
+                  dept.code_insee ||
+                  "";
 
-              if (!data || data.length === 0) {
+                if (!code) {
+                  return;
+                }
+
+                if (!deptMap.has(code)) {
+                  deptMap.set(code, {
+                    id: dept.id ?? code,
+                    code,
+                    name: dept.name || dept.nom || dept.libelle || "",
+                    km: dept.km ?? dept.distance ?? null,
+                  });
+                }
+              });
+
+              if (!deptMap.size) {
                 if (!isActive) return;
-                setError("Aucune donnée trouvée dans la vue v_tarifs_complets.");
+                setError(
+                  "Aucun département disponible. Merci de vérifier les données Supabase.",
+                );
                 setDepartments([]);
                 setTransporters([]);
                 return;
               }
 
-              // 🧩 Construction des départements uniques
-              const deptMap = new Map();
-              data.forEach((row, index) => {
-                if (!deptMap.has(row.departement_code)) {
-                  deptMap.set(row.departement_code, {
-                    id: index + 1,
-                    code: row.departement_code,
-                    name: row.departement_name,
-                    km: row.km,
-                  });
-                }
-              });
               const deptList = Array.from(deptMap.values()).sort((a, b) =>
                 a.code.localeCompare(b.code, "fr", { numeric: true })
               );
 
-              // 🧩 Construction des transporteurs
-              const transpMap = new Map();
-              data.forEach((row) => {
-                if (!transpMap.has(row.transporteur_nom)) {
-                  transpMap.set(row.transporteur_nom, {
-                    id: row.transporteur_id,
-                    name: row.transporteur_nom,
-                    hasBreakOfCharge: row.break_of_charge || false,
-                    breakOfChargeCost: row.break_of_charge_cost || 0,
-                    rates: [],
-                  });
+              const transportersMap = new Map();
+              (transportersResult.data || []).forEach((transporter) => {
+                const breakOfChargeRaw =
+                  transporter.break_of_charge ??
+                  transporter.has_break_of_charge ??
+                  transporter.hasBreakOfCharge ??
+                  false;
+                const breakOfChargeCostRaw =
+                  transporter.break_of_charge_cost ??
+                  transporter.breakOfChargeCost ??
+                  transporter.break_cost ??
+                  null;
+
+                transportersMap.set(transporter.id, {
+                  id: transporter.id,
+                  name:
+                    transporter.nom ||
+                    transporter.name ||
+                    transporter.libelle ||
+                    "",
+                  hasBreakOfCharge: Boolean(breakOfChargeRaw),
+                  breakOfChargeCost:
+                    breakOfChargeCostRaw !== undefined &&
+                    breakOfChargeCostRaw !== null
+                      ? Number(breakOfChargeCostRaw)
+                      : 0,
+                  rates: [],
+                });
+              });
+
+              (tariffsResult.data || []).forEach((tariff) => {
+                const transporter = transportersMap.get(tariff.transporteur_id);
+                if (!transporter) {
+                  return;
                 }
-                const transporter = transpMap.get(row.transporteur_nom);
-                const dept = deptMap.get(row.departement_code);
-                if (dept) {
-                  transporter.rates.push({
-                    deptId: dept.id,
-                    departmentCode: dept.code,
-                    tarpsCost: row.prix_bache,
-                    flatbedCost: row.prix_plateau,
-                    kmFromSprimont: row.km,
-                  });
+
+                const deptCode =
+                  tariff.departement_code || tariff.department_code || "";
+                const dept = deptMap.get(deptCode);
+
+                if (!dept) {
+                  return;
                 }
+
+                transporter.rates.push({
+                  deptId: dept.id,
+                  departmentCode: dept.code,
+                  kmFromSprimont: dept.km,
+                  tarpsCost: tariff.prix_bache,
+                  flatbedCost: tariff.prix_plateau,
+                });
               });
 
               if (!isActive) return;
 
               setDepartments(deptList);
-              setTransporters(Array.from(transpMap.values()));
+              setTransporters(Array.from(transportersMap.values()));
             } catch (err) {
               console.error("❌ Erreur Supabase :", err);
               if (isActive) setError(err.message || "Erreur inconnue");
@@ -1999,6 +2125,16 @@
           },
           [filteredDepartments, selectedDepts]
         );
+
+        const toggleDepartmentSelection = useCallback((deptId) => {
+          setSelectedDepts((prev) => {
+            if (prev.includes(deptId)) {
+              return prev.filter((id) => id !== deptId);
+            }
+
+            return [...prev, deptId];
+          });
+        }, []);
 
         const handleValidate = async () => {
           if (!bestTransporters.length) {
@@ -2582,32 +2718,40 @@
                       Aucun département ne correspond à la recherche.
                     </p>
                   ) : (
-                    filteredDepartments.map((dept) => (
-                      <div
-                        key={dept.id}
-                        className="flex items-center justify-between bg-gray-50 p-2 rounded hover:bg-gray-100"
-                      >
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedDepts.includes(dept.id)}
-                            onChange={(e) =>
-                              setSelectedDepts((prev) =>
-                                e.target.checked
-                                  ? [...prev, dept.id]
-                                  : prev.filter((id) => id !== dept.id)
-                              )
+                    filteredDepartments.map((dept) => {
+                      const isSelected = selectedDepts.includes(dept.id);
+
+                      return (
+                        <div
+                          key={dept.id}
+                          className={`flex items-center justify-between bg-gray-50 p-2 rounded hover:bg-gray-100 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isSelected ? "ring-2 ring-indigo-400" : ""}`}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => toggleDepartmentSelection(dept.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              toggleDepartmentSelection(dept.id);
                             }
-                            className="text-indigo-600"
-                          />
-                          <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">
-                            {dept.code}
-                          </span>
-                          <span>{dept.name}</span>
+                          }}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={() => toggleDepartmentSelection(dept.id)}
+                              className="text-indigo-600"
+                            />
+                            <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">
+                              {dept.code}
+                            </span>
+                            <span>{dept.name}</span>
+                          </div>
+                          <span className="text-sm text-gray-500">{dept.km} km</span>
                         </div>
-                        <span className="text-sm text-gray-500">{dept.km} km</span>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
