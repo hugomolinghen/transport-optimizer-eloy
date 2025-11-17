@@ -1870,6 +1870,12 @@
                   transporter.breakOfChargeCost ??
                   transporter.break_cost ??
                   null;
+                const kmFeeRaw =
+                  transporter.frais_km ??
+                  transporter.fraisKm ??
+                  transporter.cout_km ??
+                  transporter.coutKm ??
+                  null;
 
                 transportersMap.set(transporter.id, {
                   id: transporter.id,
@@ -1883,6 +1889,10 @@
                     breakOfChargeCostRaw !== undefined &&
                     breakOfChargeCostRaw !== null
                       ? Number(breakOfChargeCostRaw)
+                      : 0,
+                  kmFee:
+                    kmFeeRaw !== undefined && kmFeeRaw !== null
+                      ? Number(kmFeeRaw)
                       : 0,
                   rates: [],
                 });
