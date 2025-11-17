@@ -2126,6 +2126,16 @@
           [filteredDepartments, selectedDepts]
         );
 
+        const toggleDepartmentSelection = useCallback((deptId) => {
+          setSelectedDepts((prev) => {
+            if (prev.includes(deptId)) {
+              return prev.filter((id) => id !== deptId);
+            }
+
+            return [...prev, deptId];
+          });
+        }, []);
+
         const handleValidate = async () => {
           if (!bestTransporters.length) {
             setValidationError("Aucun résultat à valider.");
@@ -2708,32 +2718,40 @@
                       Aucun département ne correspond à la recherche.
                     </p>
                   ) : (
-                    filteredDepartments.map((dept) => (
-                      <div
-                        key={dept.id}
-                        className="flex items-center justify-between bg-gray-50 p-2 rounded hover:bg-gray-100"
-                      >
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedDepts.includes(dept.id)}
-                            onChange={(e) =>
-                              setSelectedDepts((prev) =>
-                                e.target.checked
-                                  ? [...prev, dept.id]
-                                  : prev.filter((id) => id !== dept.id)
-                              )
+                    filteredDepartments.map((dept) => {
+                      const isSelected = selectedDepts.includes(dept.id);
+
+                      return (
+                        <div
+                          key={dept.id}
+                          className={`flex items-center justify-between bg-gray-50 p-2 rounded hover:bg-gray-100 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isSelected ? "ring-2 ring-indigo-400" : ""}`}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => toggleDepartmentSelection(dept.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              toggleDepartmentSelection(dept.id);
                             }
-                            className="text-indigo-600"
-                          />
-                          <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">
-                            {dept.code}
-                          </span>
-                          <span>{dept.name}</span>
+                          }}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={() => toggleDepartmentSelection(dept.id)}
+                              className="text-indigo-600"
+                            />
+                            <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">
+                              {dept.code}
+                            </span>
+                            <span>{dept.name}</span>
+                          </div>
+                          <span className="text-sm text-gray-500">{dept.km} km</span>
                         </div>
-                        <span className="text-sm text-gray-500">{dept.km} km</span>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
