@@ -1870,6 +1870,12 @@
                   transporter.breakOfChargeCost ??
                   transporter.break_cost ??
                   null;
+                const authorizedKmRaw =
+                  transporter.km_autorise ??
+                  transporter.kmAutorise ??
+                  transporter.km_autorized ??
+                  transporter.authorized_km ??
+                  null;
                 const kmFeeRaw =
                   transporter.frais_km ??
                   transporter.fraisKm ??
@@ -1890,6 +1896,10 @@
                     breakOfChargeCostRaw !== null
                       ? Number(breakOfChargeCostRaw)
                       : 0,
+                  authorizedKm:
+                    authorizedKmRaw !== undefined && authorizedKmRaw !== null
+                      ? Number(authorizedKmRaw)
+                      : null,
                   kmFee:
                     kmFeeRaw !== undefined && kmFeeRaw !== null
                       ? Number(kmFeeRaw)
