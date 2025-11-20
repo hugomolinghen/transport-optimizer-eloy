@@ -1640,10 +1640,16 @@
         const [logsLoading, setLogsLoading] = useState(false);
         const [logsError, setLogsError] = useState("");
         const [showAllLogs, setShowAllLogs] = useState(false);
+        const [logsSearchTerm, setLogsSearchTerm] = useState("");
         const [isSearching, setIsSearching] = useState(false);
         const [isSavingLog, setIsSavingLog] = useState(false);
         const [showTransporters, setShowTransporters] = useState(false);
         const [selectedResultIndex, setSelectedResultIndex] = useState(null);
+        const [displayedResults, setDisplayedResults] = useState([]);
+        const [resultsSource, setResultsSource] = useState("search");
+        const [activeLogId, setActiveLogId] = useState(null);
+        const [activeLogValidated, setActiveLogValidated] = useState(false);
+        const [activeLogMetadata, setActiveLogMetadata] = useState(null);
         const [reasons, setReasons] = useState({});
         const [validationError, setValidationError] = useState("");
         const [validationMessage, setValidationMessage] = useState("");
@@ -1701,7 +1707,15 @@
 
             if (error) throw error;
 
-            setLogs(data || []);
+            const normalizedLogs = (data || []).map((log) => ({
+              ...log,
+              valide:
+                typeof log.valide === "boolean"
+                  ? log.valide
+                  : true,
+            }));
+
+            setLogs(normalizedLogs);
           } catch (err) {
             console.error("❌ Erreur récupération logs :", err);
             setLogsError(err.message || "Impossible de récupérer l'historique.");
@@ -2317,12 +2331,22 @@
           return numericDifference;
         };
 
+        const filteredLogs = useMemo(() => {
+          const query = logsSearchTerm.trim().toLowerCase();
+          if (!query) return logs;
+
+          return logs.filter((log) => {
+            const bordereauValue = (log.bordereau || "").toLowerCase();
+            return bordereauValue.includes(query);
+          });
+        }, [logs, logsSearchTerm]);
+
         const visibleLogs = useMemo(() => {
           if (showAllLogs) {
-            return logs;
+            return filteredLogs;
           }
-          return logs.slice(0, 5);
-        }, [logs, showAllLogs]);
+          return filteredLogs.slice(0, 5);
+        }, [filteredLogs, showAllLogs]);
 
         const scrollToResults = () => {
           if (resultsRef.current) {
@@ -2330,18 +2354,223 @@
           }
         };
 
-        const handleSearch = () => {
+        const buildLogPayload = ({
+          rankedChoices,
+          selectedIndex,
+          differenceOverride = undefined,
+          validated = false,
+          departmentsLabel,
+          attributesLabel,
+          selectedBordereau,
+          reasonsMap = {},
+        }) => {
+          const bestChoice = rankedChoices[0] || null;
+          const selectedChoice =
+            typeof selectedIndex === "number"
+              ? rankedChoices[selectedIndex] || bestChoice
+              : bestChoice;
+
+          const computeNumericCost = (choice) => {
+            if (!choice) return null;
+            const numericCost = Number(choice.totalCost);
+            return Number.isFinite(numericCost) ? numericCost : null;
+          };
+
+          const rankedCosts = rankedChoices.map((choice) =>
+            computeNumericCost(choice)
+          );
+
+          const bestCost = rankedCosts[0];
+          const selectedCost = computeNumericCost(selectedChoice);
+
+          const differenceValue =
+            differenceOverride !== undefined
+              ? differenceOverride
+              : bestCost !== null && selectedCost !== null
+              ? Math.max(0, selectedCost - bestCost)
+              : null;
+
+          const payload = {
+            identifiant: userIdentifier,
+            utilisateur: userDisplayName,
+            bordereau: selectedBordereau,
+            departements: departmentsLabel || null,
+            attributs: attributesLabel || null,
+            resultat:
+              selectedChoice?.transporter?.name || selectedChoice?.name || null,
+            choix_1: rankedChoices[0]
+              ? rankedChoices[0].transporter?.name || rankedChoices[0].name
+              : null,
+            choix_2: rankedChoices[1]
+              ? rankedChoices[1].transporter?.name || rankedChoices[1].name
+              : null,
+            choix_3: rankedChoices[2]
+              ? rankedChoices[2].transporter?.name || rankedChoices[2].name
+              : null,
+            cout_1:
+              rankedCosts[0] !== null ? Number(rankedCosts[0].toFixed(2)) : null,
+            cout_2:
+              rankedCosts[1] !== null ? Number(rankedCosts[1].toFixed(2)) : null,
+            cout_3:
+              rankedCosts[2] !== null ? Number(rankedCosts[2].toFixed(2)) : null,
+            difference:
+              differenceValue !== null && differenceValue !== undefined
+                ? Number(differenceValue.toFixed(2))
+                : null,
+            raison_1: reasonsMap[0] ? reasonsMap[0].trim() || null : null,
+            raison_2: reasonsMap[1] ? reasonsMap[1].trim() || null : null,
+            raison_3: reasonsMap[2] ? reasonsMap[2].trim() || null : null,
+            valide: validated,
+          };
+
+          return payload;
+        };
+
+        const persistLog = async (payload, { mode = "insert", logId = null }) => {
+          const hasValidationFlag = Object.prototype.hasOwnProperty.call(
+            payload,
+            "valide"
+          );
+
+          const runQuery = async (attemptPayload) => {
+            if (mode === "update" && logId) {
+              return supabase
+                .from("logs")
+                .update(attemptPayload)
+                .eq("id", logId)
+                .select()
+                .single();
+            }
+
+            return supabase
+              .from("logs")
+              .insert([attemptPayload])
+              .select()
+              .single();
+          };
+
+          let { data, error } = await runQuery(payload);
+
+          if (
+            error &&
+            hasValidationFlag &&
+            typeof error.message === "string" &&
+            error.message.toLowerCase().includes("column")
+          ) {
+            const { valide: _ignoredValide, ...fallbackPayload } = payload;
+            ({ data, error } = await runQuery(fallbackPayload));
+          }
+
+          if (error) {
+            throw error;
+          }
+
+          return data;
+        };
+
+        const buildResultsFromLog = (log) => {
+          const choices = [1, 2, 3]
+            .map((idx) => {
+              const name = log[`choix_${idx}`] || null;
+              const rawCost = log[`cout_${idx}`];
+              const numericCost = Number(rawCost);
+              const hasCost = Number.isFinite(numericCost);
+
+              if (!name && !hasCost) {
+                return null;
+              }
+
+              return {
+                transporter: { id: `${log.id}-${idx}`, name: name || "Transporteur" },
+                name: name || "Transporteur",
+                totalCost: hasCost ? numericCost : null,
+                details: [],
+              };
+            })
+            .filter(Boolean);
+
+          if (choices.length) {
+            return choices;
+          }
+
+          if (log.resultat) {
+            return [
+              {
+                transporter: { id: `${log.id}-result`, name: log.resultat },
+                name: log.resultat,
+                totalCost: null,
+                details: [],
+              },
+            ];
+          }
+
+          return [];
+        };
+
+        const handleSearch = async () => {
           setHasSearched(true);
           setSelectedResultIndex(null);
           setReasons({});
           setValidationError("");
           setValidationMessage("");
           setIsSearching(true);
+          setResultsSource("search");
 
-          setTimeout(() => {
-            scrollToResults();
-            setIsSearching(false);
-          }, 150);
+          const rankedChoices = bestTransporters.slice(0, 3);
+          setDisplayedResults(rankedChoices);
+          setActiveLogValidated(false);
+
+          const formattedDepartments = optimalRoute
+            .map((dept) => `${dept.code} - ${dept.name}`)
+            .join(", ");
+
+          const attributesLabel =
+            truckType === "bache"
+              ? "Camion baché"
+              : truckType === "plateau"
+              ? "Camion plateau"
+              : null;
+
+          try {
+            if (userIdentifier && rankedChoices.length) {
+              const payload = buildLogPayload({
+                rankedChoices,
+                selectedIndex: 0,
+                differenceOverride: null,
+                validated: false,
+                departmentsLabel: formattedDepartments,
+                attributesLabel,
+                selectedBordereau: bordereau,
+              });
+
+              const savedLog = await persistLog(payload, { mode: "insert" });
+              setActiveLogId(savedLog?.id || null);
+              setActiveLogMetadata({
+                departements: formattedDepartments,
+                attributs: attributesLabel,
+                bordereau,
+              });
+              setActiveLogValidated(Boolean(savedLog?.valide));
+              await fetchLogs();
+            } else {
+              setActiveLogId(null);
+              setActiveLogMetadata({
+                departements: formattedDepartments,
+                attributs: attributesLabel,
+                bordereau,
+              });
+            }
+          } catch (err) {
+            console.error("❌ Erreur lors de la journalisation de la recherche :", err);
+            setLogsError(
+              err.message || "Impossible d'enregistrer cette recherche dans l'historique."
+            );
+          } finally {
+            setTimeout(() => {
+              scrollToResults();
+              setIsSearching(false);
+            }, 150);
+          }
         };
 
         const handleDepartmentSearchKeyDown = useCallback(
@@ -2393,7 +2622,7 @@
         }, []);
 
         const handleValidate = async () => {
-          if (!bestTransporters.length) {
+          if (!displayedResults.length) {
             setValidationError("Aucun résultat à valider.");
             return;
           }
@@ -2415,19 +2644,28 @@
             setValidationMessage("");
             setIsSavingLog(true);
 
-            const formattedDepartments = optimalRoute
-              .map((dept) => `${dept.code} - ${dept.name}`)
-              .join(", ");
+            const formattedDepartments =
+              activeLogMetadata?.departements ||
+              optimalRoute
+                .map((dept) => `${dept.code} - ${dept.name}`)
+                .join(", ");
 
-            const rankedChoices = bestTransporters.slice(0, 3);
+            const attributesLabel =
+              activeLogMetadata?.attributs ||
+              (truckType === "bache"
+                ? "Camion baché"
+                : truckType === "plateau"
+                ? "Camion plateau"
+                : null);
+
+            const rankedChoices = displayedResults.slice(0, 3);
             const selectedChoice = rankedChoices[selectedResultIndex];
-            const bestChoice = bestTransporters[0] || null;
+            const bestChoice = rankedChoices[0] || null;
+            const selectedCost = Number(selectedChoice?.totalCost);
+            const bestCost = Number(bestChoice?.totalCost);
             const differenceValue =
-              bestChoice && selectedChoice
-                ? Math.max(
-                    0,
-                    selectedChoice.totalCost - bestChoice.totalCost
-                  )
+              Number.isFinite(selectedCost) && Number.isFinite(bestCost)
+                ? Math.max(0, selectedCost - bestCost)
                 : null;
 
             if (!selectedChoice) {
@@ -2436,51 +2674,29 @@
               return;
             }
 
-            const payload = {
-              identifiant: userIdentifier,
-              utilisateur: userDisplayName,
-              bordereau,
-              departements: formattedDepartments || null,
-              attributs:
-                truckType === "bache"
-                  ? "Camion baché"
-                  : truckType === "plateau"
-                  ? "Camion plateau"
-                  : null,
-              resultat: selectedChoice.transporter.name,
-              choix_1: rankedChoices[0]
-                ? rankedChoices[0].transporter.name
-                : null,
-              choix_2: rankedChoices[1]
-                ? rankedChoices[1].transporter.name
-                : null,
-              choix_3: rankedChoices[2]
-                ? rankedChoices[2].transporter.name
-                : null,
-              cout_1: rankedChoices[0]
-                ? Number(rankedChoices[0].totalCost.toFixed(2))
-                : null,
-              cout_2: rankedChoices[1]
-                ? Number(rankedChoices[1].totalCost.toFixed(2))
-                : null,
-              cout_3: rankedChoices[2]
-                ? Number(rankedChoices[2].totalCost.toFixed(2))
-                : null,
-              difference:
-                differenceValue !== null
-                  ? Number(differenceValue.toFixed(2))
-                  : null,
-              raison_1: reasons[0] ? reasons[0].trim() || null : null,
-              raison_2: reasons[1] ? reasons[1].trim() || null : null,
-              raison_3: reasons[2] ? reasons[2].trim() || null : null,
-            };
+            const payload = buildLogPayload({
+              rankedChoices,
+              selectedIndex: selectedResultIndex,
+              differenceOverride: differenceValue,
+              validated: true,
+              departmentsLabel: formattedDepartments,
+              attributesLabel,
+              selectedBordereau: activeLogMetadata?.bordereau || bordereau,
+              reasonsMap: reasons,
+            });
 
-            const { error } = await supabase.from("logs").insert([payload]);
+            const savedLog = await persistLog(payload, {
+              mode: activeLogId ? "update" : "insert",
+              logId: activeLogId,
+            });
 
-            if (error) {
-              throw error;
-            }
-
+            setActiveLogId(savedLog?.id || activeLogId);
+            setActiveLogValidated(true);
+            setActiveLogMetadata({
+              departements: formattedDepartments,
+              attributs: attributesLabel,
+              bordereau: activeLogMetadata?.bordereau || bordereau,
+            });
             setValidationMessage("Résultat enregistré avec succès.");
             await fetchLogs();
           } catch (err) {
@@ -2491,6 +2707,52 @@
           } finally {
             setIsSavingLog(false);
           }
+        };
+
+        const handleLogSelection = (log) => {
+          if (!log) return;
+
+          const restoredResults = buildResultsFromLog(log);
+          const restoredReasons = {};
+
+          [1, 2, 3].forEach((idx) => {
+            const reason = log[`raison_${idx}`];
+            if (reason) {
+              restoredReasons[idx - 1] = reason;
+            }
+          });
+
+          const inferredTruckType = (() => {
+            const attributes = (log.attributs || "").toLowerCase();
+            if (attributes.includes("plateau")) return "plateau";
+            if (attributes.includes("bach")) return "bache";
+            return truckType;
+          })();
+
+          setHasSearched(true);
+          setResultsSource("history");
+          setSelectedResultIndex(null);
+          setValidationError("");
+          setValidationMessage("");
+          setDisplayedResults(restoredResults);
+          setActiveLogId(log.id || null);
+          setActiveLogValidated(Boolean(log.valide));
+          setActiveLogMetadata({
+            departements: log.departements || "",
+            attributs: log.attributs || "",
+            bordereau: log.bordereau || "",
+          });
+          setBordereau(log.bordereau || "");
+          setTruckType(inferredTruckType);
+          setReasons(restoredReasons);
+
+          const selectedIdx = restoredResults.findIndex((item) => {
+            const transporterName = item.transporter?.name || item.name;
+            return transporterName === log.resultat;
+          });
+          setSelectedResultIndex(selectedIdx >= 0 ? selectedIdx : null);
+
+          scrollToResults();
         };
 
         const handleLogin = useCallback(
@@ -3139,7 +3401,7 @@
             </div>
 
             {/* ======= RÉSULTATS DU CALCUL ======= */}
-            {hasSearched && bestTransporters.length > 0 && (
+            {hasSearched && displayedResults.length > 0 && (
               <div
                 ref={resultsRef}
                 id="resultats"
@@ -3152,11 +3414,14 @@
                   </div>
                   <button
                     onClick={handleValidate}
-                    className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-green-600 text-white text-sm font-semibold hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                    className={`inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed ${
+                      activeLogValidated ? "bg-gray-400" : "bg-green-600"
+                    }`}
                     disabled={
                       isSavingLog ||
                       selectedResultIndex === null ||
-                      !bestTransporters.length
+                      !displayedResults.length ||
+                      activeLogValidated
                     }
                   >
                     {isSavingLog ? "Validation..." : "Valider"}
@@ -3175,53 +3440,60 @@
                   </div>
                 )}
 
-                {bestTransporters.slice(0, 3).map((result, index) => {
+                {displayedResults.slice(0, 3).map((result, index) => {
                   const isSelected = selectedResultIndex === index;
                   const reasonValue = reasons[index] || "";
+                  const numericCost = Number(result.totalCost);
+                  const hasCost = Number.isFinite(numericCost);
 
                   return (
                     <div
-                      key={result.transporter.id}
+                      key={result.transporter?.id || result.transporter?.name || index}
                       className={`p-6 rounded-lg border-2 mb-4 transition-colors ${
                         isSelected
                           ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200"
-                          : index === 0
-                          ? "bg-green-50 border-green-500"
-                          : "bg-gray-50 border-gray-200"
+                          : "border-gray-200"
                       }`}
                     >
-                      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                        <div className="flex-1">
-                          <div className="flex justify-between mb-3">
-                            <div className="flex items-center gap-3">
-                              {index === 0 && !isSelected && (
-                                <span className="bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">
-                                  ⭐ MEILLEUR CHOIX
-                                </span>
-                              )}
-                              {isSelected && (
-                                <span className="bg-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-full">
-                                  ✅ SÉLECTIONNÉ
-                                </span>
-                              )}
-                              <h3 className="text-xl font-bold text-gray-800">
-                                {result.transporter.name}
-                              </h3>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <TruckIcon className="text-green-600" size={28} />
+                          <div>
+                            <div className="text-lg font-semibold text-gray-800">
+                              {result.transporter?.name || result.name || "Transporteur"}
                             </div>
-                            <div className="text-right">
-                              <div className="text-3xl font-bold text-indigo-600">
-                                {result.totalCost.toFixed(2)}€
-                              </div>
-                              <div className="text-sm text-gray-500">Coût total</div>
+                            <div className="text-sm text-gray-500">
+                              Tarif total :
+                              {" "}
+                              {hasCost
+                                ? `${numericCost.toFixed(2)}€`
+                                : "Montant indisponible"}
                             </div>
-                          </div>
-                          <div className="space-y-1 text-sm text-gray-700">
-                            {result.details.map((d, i) => (
-                              <p key={i}>• {d}</p>
-                            ))}
                           </div>
                         </div>
-                        <div className="w-full md:w-64">
+                        <div className="text-right">
+                          <div className="text-2xl font-bold text-green-600">
+                            {hasCost ? `${numericCost.toFixed(2)}€` : "—"}
+                          </div>
+                          <div className="text-xs text-gray-500">Coût estimé</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div className="space-y-2 text-sm text-gray-600">
+                          {Array.isArray(result.details) && result.details.length > 0 && (
+                            <ul className="space-y-1">
+                              {result.details.map((detail, detailIndex) => (
+                                <li key={detailIndex} className="flex items-start gap-2">
+                                  <span className="mt-0.5 text-green-500">•</span>
+                                  <span>{detail}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+
+                        <div className="md:w-60">
                           <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
                             <input
                               type="checkbox"
@@ -3234,6 +3506,7 @@
                                 setValidationError("");
                                 setValidationMessage("");
                               }}
+                              disabled={activeLogValidated}
                             />
                             Utiliser ce transporteur
                           </label>
@@ -3257,6 +3530,7 @@
                               setValidationMessage("");
                             }}
                             className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                            disabled={activeLogValidated}
                           >
                             <option value="">Sélectionner une raison</option>
                             {NON_SELECTION_REASONS.map((reason) => (
@@ -3272,7 +3546,10 @@
                 })}
               </div>
             )}
-            {hasSearched && selectedDepts.length > 0 && bestTransporters.length === 0 && (
+            {hasSearched &&
+              resultsSource === "search" &&
+              selectedDepts.length > 0 &&
+              bestTransporters.length === 0 && (
               <div
                 ref={resultsRef}
                 id="resultats"
@@ -3288,27 +3565,53 @@
             )}
 
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
                 <h2 className="text-xl font-bold text-gray-800">Historique des recherches</h2>
-                {logsLoading && <span className="text-sm text-gray-500">Chargement...</span>}
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                  <div className="relative w-full md:w-80">
+                    <SearchIcon
+                      size={16}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    />
+                    <input
+                      type="text"
+                      value={logsSearchTerm}
+                      onChange={(event) => setLogsSearchTerm(event.target.value)}
+                      placeholder="Rechercher un bordereau"
+                      className="w-full border border-gray-300 rounded-lg py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                    />
+                  </div>
+                  {logsLoading && <span className="text-sm text-gray-500">Chargement...</span>}
+                </div>
               </div>
 
               {logsError && (
                 <div className="bg-red-50 text-red-600 text-sm p-3 rounded mb-4">{logsError}</div>
               )}
 
-              {!logsLoading && logs.length === 0 ? (
+              {!logsLoading && filteredLogs.length === 0 ? (
                 <p className="text-sm text-gray-500">
-                  Aucune recherche enregistrée pour le moment. Lancez une recherche pour voir les
-                  derniers résultats ici.
+                  Aucune recherche ne correspond à ce bordereau. Lancez une nouvelle recherche ou
+                  ajustez le filtre.
                 </p>
               ) : (
                 <>
                   <ul className="space-y-4">
                     {visibleLogs.map((log) => (
                       <li key={log.id} className="border border-gray-200 rounded-lg p-4">
-                        <div className="flex items-center justify-between text-sm text-gray-500 mb-2">
-                          <span className="font-medium text-gray-700">{log.bordereau}</span>
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-500 mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-700">{log.bordereau}</span>
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                log.valide
+                                  ? "bg-green-100 text-green-700"
+                                  : "bg-amber-100 text-amber-700"
+                              }`}
+                            >
+                              {log.valide ? "Validée" : "À valider"}
+                            </span>
+                          </div>
                           <span>{formatLogDate(log.date_recherche)}</span>
                         </div>
                         {(() => {
@@ -3380,11 +3683,23 @@
                             })}
                           </ul>
                         )}
+
+                        <div className="mt-4 flex flex-wrap items-center gap-3">
+                          <button
+                            onClick={() => handleLogSelection(log)}
+                            className="inline-flex items-center gap-2 rounded-md bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100"
+                          >
+                            <RefreshIcon size={16} /> Réafficher cette recherche
+                          </button>
+                          {log.valide && (
+                            <span className="text-xs text-gray-500">Cette recherche a déjà été validée.</span>
+                          )}
+                        </div>
                       </li>
                     ))}
                   </ul>
 
-                  {logs.length > 5 && (
+                  {filteredLogs.length > 5 && (
                     <div className="mt-4">
                       <button
                         onClick={() => setShowAllLogs((prev) => !prev)}
