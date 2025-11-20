@@ -2183,16 +2183,33 @@
             }
 
             const kmFee = Number(transporter.kmFee);
+            const authorizedDetourKmRaw = Number(transporter.authorizedKm);
+            const authorizedDetourKm =
+              Number.isFinite(authorizedDetourKmRaw) && authorizedDetourKmRaw > 0
+                ? authorizedDetourKmRaw
+                : 0;
+
             if (routeMetrics.detourKm > 0) {
               if (!Number.isFinite(kmFee) || kmFee < 0) {
                 continue;
               }
 
-              const detourCost = routeMetrics.detourKm * kmFee;
-              totalCost += detourCost;
-              details.push(
-                `+ Détour (${routeMetrics.detourKm.toFixed(2)} km × ${kmFee.toFixed(2)}€) : ${detourCost.toFixed(2)}€`
+              const billableDetourKm = Math.max(
+                0,
+                routeMetrics.detourKm - authorizedDetourKm
               );
+
+              if (billableDetourKm > 0) {
+                const detourCost = billableDetourKm * kmFee;
+                totalCost += detourCost;
+                details.push(
+                  `+ Détour (${billableDetourKm.toFixed(2)} km facturés après ${authorizedDetourKm.toFixed(2)} km offerts × ${kmFee.toFixed(2)}€) : ${detourCost.toFixed(2)}€`
+                );
+              } else if (authorizedDetourKm > 0) {
+                details.push(
+                  `+ Détour : ${routeMetrics.detourKm.toFixed(2)} km (0€ car ${authorizedDetourKm.toFixed(2)} km offerts)`
+                );
+              }
             }
 
             rankedResults.push({ transporter, totalCost, details });
