@@ -2515,10 +2515,11 @@
           setValidationMessage("");
           setIsSearching(true);
           setResultsSource("search");
+          setActiveLogId(null);
+          setActiveLogValidated(false);
 
           const rankedChoices = bestTransporters.slice(0, 3);
           setDisplayedResults(rankedChoices);
-          setActiveLogValidated(false);
 
           const formattedDepartments = optimalRoute
             .map((dept) => `${dept.code} - ${dept.name}`)
@@ -2531,46 +2532,16 @@
               ? "Camion plateau"
               : null;
 
-          try {
-            if (userIdentifier && rankedChoices.length) {
-              const payload = buildLogPayload({
-                rankedChoices,
-                selectedIndex: 0,
-                differenceOverride: null,
-                validated: false,
-                departmentsLabel: formattedDepartments,
-                attributesLabel,
-                selectedBordereau: bordereau,
-              });
+          setActiveLogMetadata({
+            departements: formattedDepartments,
+            attributs: attributesLabel,
+            bordereau,
+          });
 
-              const savedLog = await persistLog(payload, { mode: "insert" });
-              setActiveLogId(savedLog?.id || null);
-              setActiveLogMetadata({
-                departements: formattedDepartments,
-                attributs: attributesLabel,
-                bordereau,
-              });
-              setActiveLogValidated(Boolean(savedLog?.valide));
-              await fetchLogs();
-            } else {
-              setActiveLogId(null);
-              setActiveLogMetadata({
-                departements: formattedDepartments,
-                attributs: attributesLabel,
-                bordereau,
-              });
-            }
-          } catch (err) {
-            console.error("❌ Erreur lors de la journalisation de la recherche :", err);
-            setLogsError(
-              err.message || "Impossible d'enregistrer cette recherche dans l'historique."
-            );
-          } finally {
-            setTimeout(() => {
-              scrollToResults();
-              setIsSearching(false);
-            }, 150);
-          }
+          setTimeout(() => {
+            scrollToResults();
+            setIsSearching(false);
+          }, 150);
         };
 
         const handleDepartmentSearchKeyDown = useCallback(
