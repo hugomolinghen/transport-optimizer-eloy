@@ -2538,10 +2538,37 @@
             bordereau,
           });
 
-          setTimeout(() => {
-            scrollToResults();
-            setIsSearching(false);
-          }, 150);
+          try {
+            if (userIdentifier && rankedChoices.length) {
+              const payload = buildLogPayload({
+                rankedChoices,
+                selectedIndex: 0,
+                validated: false,
+                departmentsLabel: formattedDepartments,
+                attributesLabel,
+                selectedBordereau: bordereau,
+                reasonsMap: {},
+              });
+
+              const savedLog = await persistLog(payload, { mode: "insert" });
+              setActiveLogId(savedLog?.id || null);
+              setActiveLogValidated(Boolean(savedLog?.valide));
+              await fetchLogs();
+            }
+          } catch (err) {
+            console.error(
+              "❌ Erreur lors de l'enregistrement de la recherche :",
+              err
+            );
+            setLogsError(
+              err.message || "Impossible d'enregistrer la recherche dans l'historique."
+            );
+          } finally {
+            setTimeout(() => {
+              scrollToResults();
+              setIsSearching(false);
+            }, 150);
+          }
         };
 
         const handleDepartmentSearchKeyDown = useCallback(
