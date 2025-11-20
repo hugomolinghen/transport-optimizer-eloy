@@ -75,6 +75,13 @@
         lucide.Trash2 || lucide.Trash || createFallbackIcon("🗑️");
 
       const ADMIN_EMAILS = ["admin@users.eloy"];
+      const NON_SELECTION_REASONS = [
+        "Difficulté à joindre le transporteur",
+        "Délais de livraison proposés trop longs",
+        "Transporteur inadapté à la zone",
+        "Contraintes internes / planning interne incompatible",
+        "Préférence pour un autre transporteur (organisation interne)",
+      ];
 
       const sanitizeUsername = (username) => {
         if (!username) return "";
@@ -3233,7 +3240,7 @@
                           <label className="block text-xs text-gray-500 mt-4 mb-1">
                             Raison si non sélectionné
                           </label>
-                          <textarea
+                          <select
                             value={reasonValue}
                             onChange={(e) => {
                               const { value } = e.target;
@@ -3249,10 +3256,15 @@
                               setValidationError("");
                               setValidationMessage("");
                             }}
-                            rows={3}
-                            placeholder="Ex: Coût trop élevé"
                             className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
-                          />
+                          >
+                            <option value="">Sélectionner une raison</option>
+                            {NON_SELECTION_REASONS.map((reason) => (
+                              <option key={reason} value={reason}>
+                                {reason}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                     </div>
