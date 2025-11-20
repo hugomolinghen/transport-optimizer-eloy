@@ -2121,15 +2121,15 @@
             let furthestCost = null;
             let furthestDeptDetail = "";
             const details = [];
-            const missingDepartments = [];
+            let hasMissingTariff = false;
 
             for (let idx = 0; idx < optimalRoute.length; idx += 1) {
               const dept = optimalRoute[idx];
               const rate = transporter.rates.find((r) => r.deptId === dept.id);
 
               if (!rate) {
-                missingDepartments.push(dept.name);
-                continue;
+                hasMissingTariff = true;
+                break;
               }
 
               const rawCost =
@@ -2137,8 +2137,8 @@
               const parsed = parseTariff(rawCost);
 
               if (!parsed.available) {
-                missingDepartments.push(dept.name);
-                continue;
+                hasMissingTariff = true;
+                break;
               }
 
               details.push(
@@ -2151,14 +2151,8 @@
               }
             }
 
-            if (furthestCost === null) {
+            if (hasMissingTariff || furthestCost === null) {
               continue;
-            }
-
-            if (missingDepartments.length) {
-              details.push(
-                `⚠️ Tarifs manquants pour : ${missingDepartments.join(", ")}`
-              );
             }
 
             if (furthestDeptDetail) {
