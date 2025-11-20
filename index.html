@@ -75,6 +75,13 @@
         lucide.Trash2 || lucide.Trash || createFallbackIcon("🗑️");
 
       const ADMIN_EMAILS = ["admin@users.eloy"];
+      const NON_SELECTION_REASONS = [
+        "Difficulté à joindre le transporteur",
+        "Délais de livraison proposés trop longs",
+        "Transporteur inadapté à la zone",
+        "Contraintes internes / planning interne incompatible",
+        "Préférence pour un autre transporteur (organisation interne)",
+      ];
 
       const sanitizeUsername = (username) => {
         if (!username) return "";
@@ -1870,6 +1877,12 @@
                   transporter.breakOfChargeCost ??
                   transporter.break_cost ??
                   null;
+                const authorizedKmRaw =
+                  transporter.km_autorise ??
+                  transporter.kmAutorise ??
+                  transporter.km_autorized ??
+                  transporter.authorized_km ??
+                  null;
                 const kmFeeRaw =
                   transporter.frais_km ??
                   transporter.fraisKm ??
@@ -1890,6 +1903,10 @@
                     breakOfChargeCostRaw !== null
                       ? Number(breakOfChargeCostRaw)
                       : 0,
+                  authorizedKm:
+                    authorizedKmRaw !== undefined && authorizedKmRaw !== null
+                      ? Number(authorizedKmRaw)
+                      : null,
                   kmFee:
                     kmFeeRaw !== undefined && kmFeeRaw !== null
                       ? Number(kmFeeRaw)
@@ -2111,15 +2128,15 @@
             let furthestCost = null;
             let furthestDeptDetail = "";
             const details = [];
-            const missingDepartments = [];
+            let hasMissingTariff = false;
 
             for (let idx = 0; idx < optimalRoute.length; idx += 1) {
               const dept = optimalRoute[idx];
               const rate = transporter.rates.find((r) => r.deptId === dept.id);
 
               if (!rate) {
-                missingDepartments.push(dept.name);
-                continue;
+                hasMissingTariff = true;
+                break;
               }
 
               const rawCost =
@@ -2127,8 +2144,8 @@
               const parsed = parseTariff(rawCost);
 
               if (!parsed.available) {
-                missingDepartments.push(dept.name);
-                continue;
+                hasMissingTariff = true;
+                break;
               }
 
               details.push(
@@ -2141,14 +2158,8 @@
               }
             }
 
-            if (furthestCost === null) {
+            if (hasMissingTariff || furthestCost === null) {
               continue;
-            }
-
-            if (missingDepartments.length) {
-              details.push(
-                `⚠️ Tarifs manquants pour : ${missingDepartments.join(", ")}`
-              );
             }
 
             if (furthestDeptDetail) {
@@ -2183,16 +2194,33 @@
             }
 
             const kmFee = Number(transporter.kmFee);
+            const authorizedDetourKmRaw = Number(transporter.authorizedKm);
+            const authorizedDetourKm =
+              Number.isFinite(authorizedDetourKmRaw) && authorizedDetourKmRaw > 0
+                ? authorizedDetourKmRaw
+                : 0;
+
             if (routeMetrics.detourKm > 0) {
               if (!Number.isFinite(kmFee) || kmFee < 0) {
                 continue;
               }
 
-              const detourCost = routeMetrics.detourKm * kmFee;
-              totalCost += detourCost;
-              details.push(
-                `+ Détour (${routeMetrics.detourKm.toFixed(2)} km × ${kmFee.toFixed(2)}€) : ${detourCost.toFixed(2)}€`
+              const billableDetourKm = Math.max(
+                0,
+                routeMetrics.detourKm - authorizedDetourKm
               );
+
+              if (billableDetourKm > 0) {
+                const detourCost = billableDetourKm * kmFee;
+                totalCost += detourCost;
+                details.push(
+                  `+ Détour (${billableDetourKm.toFixed(2)} km facturés après ${authorizedDetourKm.toFixed(2)} km offerts × ${kmFee.toFixed(2)}€) : ${detourCost.toFixed(2)}€`
+                );
+              } else if (authorizedDetourKm > 0) {
+                details.push(
+                  `+ Détour : ${routeMetrics.detourKm.toFixed(2)} km (0€ car ${authorizedDetourKm.toFixed(2)} km offerts)`
+                );
+              }
             }
 
             rankedResults.push({ transporter, totalCost, details });
@@ -3212,7 +3240,7 @@
                           <label className="block text-xs text-gray-500 mt-4 mb-1">
                             Raison si non sélectionné
                           </label>
-                          <textarea
+                          <select
                             value={reasonValue}
                             onChange={(e) => {
                               const { value } = e.target;
@@ -3228,10 +3256,15 @@
                               setValidationError("");
                               setValidationMessage("");
                             }}
-                            rows={3}
-                            placeholder="Ex: Coût trop élevé"
                             className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
-                          />
+                          >
+                            <option value="">Sélectionner une raison</option>
+                            {NON_SELECTION_REASONS.map((reason) => (
+                              <option key={reason} value={reason}>
+                                {reason}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                     </div>
