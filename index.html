@@ -1673,6 +1673,8 @@
         const [isLoginPasswordVisible, setIsLoginPasswordVisible] = useState(false);
         const [isRegisterPasswordVisible, setIsRegisterPasswordVisible] = useState(false);
 
+        const LOCAL_HISTORY_STORAGE_KEY = "transport-optimizer:search-history";
+
         const generateLocalId = () => {
           if (typeof crypto !== "undefined" && crypto.randomUUID) {
             return crypto.randomUUID();
@@ -1727,6 +1729,39 @@
             .filter(Boolean)
             .map((dept) => `${dept.code} - ${dept.name}`)
             .join(", ");
+
+        useEffect(() => {
+          if (typeof localStorage === "undefined") return;
+
+          try {
+            const storedHistory = localStorage.getItem(LOCAL_HISTORY_STORAGE_KEY);
+            if (!storedHistory) return;
+
+            const parsedHistory = JSON.parse(storedHistory);
+            if (!Array.isArray(parsedHistory)) return;
+
+            setSearchHistory((prev) =>
+              sortHistoryEntries([...prev, ...parsedHistory])
+            );
+          } catch (err) {
+            console.error("❌ Erreur chargement historique local :", err);
+          }
+        }, []);
+
+        useEffect(() => {
+          if (typeof localStorage === "undefined") return;
+
+          const localEntries = searchHistory.filter((entry) => !entry.supabaseId);
+
+          try {
+            localStorage.setItem(
+              LOCAL_HISTORY_STORAGE_KEY,
+              JSON.stringify(localEntries)
+            );
+          } catch (err) {
+            console.error("❌ Erreur sauvegarde historique local :", err);
+          }
+        }, [searchHistory]);
 
         const handleDataRefresh = useCallback(() => {
           setDataReloadFlag((value) => value + 1);
