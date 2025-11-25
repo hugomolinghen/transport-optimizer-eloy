@@ -2153,11 +2153,11 @@
 
           const rankedResults = [];
 
-          const selectRateCost = (rate) => {
+          const selectRateCost = (rate, selectedTruckType) => {
             const parsedTarps = parseTariff(rate.tarpsCost);
             const parsedFlatbed = parseTariff(rate.flatbedCost);
 
-            if (truckType === "bache") {
+            if (selectedTruckType === "bache") {
               return {
                 available: parsedTarps.available,
                 value: parsedTarps.value,
@@ -2165,7 +2165,7 @@
               };
             }
 
-            if (truckType === "plateau") {
+            if (selectedTruckType === "plateau") {
               return {
                 available: parsedFlatbed.available,
                 value: parsedFlatbed.value,
@@ -2190,13 +2190,10 @@
           };
 
           for (const transporter of transporters) {
-            let furthestCost = null;
-            let furthestDeptDetail = "";
-            const details = [];
+            const deptRates = [];
             let hasMissingTariff = false;
 
-            for (let idx = 0; idx < optimalRoute.length; idx += 1) {
-              const dept = optimalRoute[idx];
+            for (const dept of optimalRoute) {
               const rate = transporter.rates.find((r) => r.deptId === dept.id);
 
               if (!rate) {
@@ -2204,7 +2201,71 @@
                 break;
               }
 
-              const selectedRate = selectRateCost(rate);
+              deptRates.push({ dept, rate });
+            }
+
+            if (hasMissingTariff) {
+              continue;
+            }
+
+            const resolveTruckType = () => {
+              if (truckType !== "non-specifie") {
+                return truckType;
+              }
+
+              const candidates = [];
+
+              const computeFurthestCost = (type) => {
+                let furthest = null;
+
+                for (const { rate } of deptRates) {
+                  const parsedRate =
+                    type === "bache"
+                      ? parseTariff(rate.tarpsCost)
+                      : parseTariff(rate.flatbedCost);
+
+                  if (!parsedRate.available) {
+                    return null;
+                  }
+
+                  if (furthest === null || parsedRate.value > furthest) {
+                    furthest = parsedRate.value;
+                  }
+                }
+
+                return furthest;
+              };
+
+              const furthestTarpsCost = computeFurthestCost("bache");
+              if (furthestTarpsCost !== null) {
+                candidates.push({ type: "bache", furthestCost: furthestTarpsCost });
+              }
+
+              const furthestFlatbedCost = computeFurthestCost("plateau");
+              if (furthestFlatbedCost !== null) {
+                candidates.push({ type: "plateau", furthestCost: furthestFlatbedCost });
+              }
+
+              if (!candidates.length) {
+                return null;
+              }
+
+              return candidates.sort((a, b) => a.furthestCost - b.furthestCost)[0].type;
+            };
+
+            const resolvedTruckType = resolveTruckType();
+
+            if (!resolvedTruckType) {
+              continue;
+            }
+
+            let furthestCost = null;
+            let furthestDeptDetail = "";
+            const details = [];
+
+            for (let idx = 0; idx < deptRates.length; idx += 1) {
+              const { dept, rate } = deptRates[idx];
+              const selectedRate = selectRateCost(rate, resolvedTruckType);
 
               if (!selectedRate.available) {
                 hasMissingTariff = true;
