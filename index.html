@@ -74,6 +74,7 @@
       const UsersIcon = lucide.Users || createFallbackIcon("🧑‍🤝‍🧑");
       const TrashIcon =
         lucide.Trash2 || lucide.Trash || createFallbackIcon("🗑️");
+      const MailIcon = lucide.Mail || createFallbackIcon("✉️");
 
       const ADMIN_EMAILS = ["admin@users.eloy"];
       const NON_SELECTION_REASONS = [
@@ -1697,6 +1698,45 @@
           if (type === "bache") return "Camion baché";
           if (type === "plateau") return "Camion plateau";
           return "Type non spécifié";
+        };
+
+        const buildMailtoLink = (transporterName) => {
+          const recipient = transporterName || "Transporteur";
+          const subjectParts = ["Demande de transport"];
+          if (bordereau) {
+            subjectParts.push(`Bordereau ${bordereau}`);
+          }
+
+          const subject = subjectParts.join(" - ");
+          const deliveryDepartments = (activeRoute.length
+            ? activeRoute
+            : selectedDepartmentList
+          ).map((dept, index) => `${index + 1}. ${dept.code} - ${dept.name}`);
+
+          const bodyLines = [
+            `Bonjour ${recipient},`,
+            "",
+            bordereau
+              ? `Nous souhaitons organiser le transport pour le bordereau ${bordereau}.`
+              : "Nous souhaitons organiser un transport (bordereau à préciser).",
+            `Type de camion : ${buildAttributesLabel(truckType)}.`,
+          ];
+
+          if (deliveryDepartments.length) {
+            bodyLines.push("Départements à livrer :", ...deliveryDepartments);
+          }
+
+          bodyLines.push(
+            "",
+            "Pouvez-vous confirmer la prise en charge et le tarif associé ?",
+            "Merci d'avance."
+          );
+
+          const body = bodyLines.join("\n");
+
+          return `mailto:${encodeURIComponent(
+            recipient
+          )}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
         };
 
         const parseDateValue = (value) => {
@@ -3592,11 +3632,18 @@
                                 {result.transporter.name}
                               </h3>
                             </div>
-                            <div className="text-right">
+                            <div className="flex flex-col items-end gap-2 text-right">
                               <div className="text-3xl font-bold text-indigo-600">
                                 {result.totalCost.toFixed(2)}€
                               </div>
                               <div className="text-sm text-gray-500">Coût total</div>
+                              <a
+                                href={buildMailtoLink(result.transporter.name)}
+                                className="inline-flex items-center gap-2 rounded-md border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
+                              >
+                                <MailIcon size={16} />
+                                Contacter par email
+                              </a>
                             </div>
                           </div>
                           <div className="space-y-1 text-sm text-gray-700">
