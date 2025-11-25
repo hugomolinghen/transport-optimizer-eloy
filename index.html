@@ -70,6 +70,7 @@
       const UploadIcon = lucide.Upload || createFallbackIcon("📤");
       const SaveIcon = lucide.Save || createFallbackIcon("💾");
       const RefreshIcon = lucide.RefreshCcw || createFallbackIcon("🔁");
+      const ArrowUpDownIcon = lucide.ArrowUpDown || createFallbackIcon("↕️");
       const UsersIcon = lucide.Users || createFallbackIcon("🧑‍🤝‍🧑");
       const TrashIcon =
         lucide.Trash2 || lucide.Trash || createFallbackIcon("🗑️");
@@ -1628,7 +1629,7 @@
         const [loading, setLoading] = useState(true);
         const [error, setError] = useState("");
         const [selectedDepts, setSelectedDepts] = useState([]);
-        const [truckType, setTruckType] = useState(""); // "bache" ou "plateau"
+        const [truckType, setTruckType] = useState("non-specifie"); // "bache", "plateau" ou "non-specifie"
         const [bordereau, setBordereau] = useState("");
         const [hasSearched, setHasSearched] = useState(false);
         const [session, setSession] = useState(null);
@@ -1640,6 +1641,7 @@
         const [logsLoading, setLogsLoading] = useState(false);
         const [logsError, setLogsError] = useState("");
         const [showAllLogs, setShowAllLogs] = useState(false);
+        const [logSearch, setLogSearch] = useState("");
         const [isSearching, setIsSearching] = useState(false);
         const [isSavingLog, setIsSavingLog] = useState(false);
         const [showTransporters, setShowTransporters] = useState(false);
@@ -1653,6 +1655,7 @@
           loading: false,
           error: "",
         });
+        const [isRouteReversed, setIsRouteReversed] = useState(false);
         const resultsRef = useRef(null);
         const [departmentSearch, setDepartmentSearch] = useState("");
         const [dataReloadFlag, setDataReloadFlag] = useState(0);
@@ -1670,6 +1673,12 @@
         const handleDataRefresh = useCallback(() => {
           setDataReloadFlag((value) => value + 1);
         }, []);
+
+        useEffect(() => {
+          if (selectedDepts.length !== 2) {
+            setIsRouteReversed(false);
+          }
+        }, [selectedDepts]);
 
         const currentYear = new Date().getFullYear();
         const BORDEREAU_REGEX = new RegExp(`^23/${currentYear}/(?!0000)\\d{4}$`);
@@ -1965,6 +1974,13 @@
           [selectedDepts, departments]
         );
 
+        const activeRoute = useMemo(() => {
+          if (isRouteReversed && optimalRoute.length === 2) {
+            return [...optimalRoute].reverse();
+          }
+          return optimalRoute;
+        }, [isRouteReversed, optimalRoute]);
+
         const selectedDepartmentList = useMemo(() => {
           return selectedDepts
             .map((id) => departments.find((dept) => dept.id === id))
@@ -1991,7 +2007,7 @@
           let isActive = true;
 
           const computeRouteMetrics = async () => {
-            if (!optimalRoute.length) {
+            if (!activeRoute.length) {
               if (!isActive) return;
               setRouteMetrics({
                 totalDistanceKm: 0,
@@ -2003,7 +2019,7 @@
             }
 
             const baseCoords = { lat: 50.5333, lon: 5.6203 };
-            const deptCoords = optimalRoute.map((dept) => {
+            const deptCoords = activeRoute.map((dept) => {
               if (
                 Number.isFinite(dept?.latitude) &&
                 Number.isFinite(dept?.longitude)
@@ -2088,7 +2104,30 @@
               }
 
               const totalDistanceKm = segmentDistanceSum;
-              const detourKm = Math.max(0, totalDistanceKm - directDistanceKm);
+              let detourKm = Math.max(0, totalDistanceKm - directDistanceKm);
+
+              if (isRouteReversed && activeRoute.length === 2) {
+                const farthestDept = activeRoute.reduce((prev, curr) =>
+                  curr.km > prev.km ? curr : prev
+                );
+                const closestDept = activeRoute.reduce((prev, curr) =>
+                  curr.km < prev.km ? curr : prev
+                );
+
+                const farthestIndex =
+                  1 + activeRoute.findIndex((dept) => dept.id === farthestDept.id);
+                const closestIndex =
+                  1 + activeRoute.findIndex((dept) => dept.id === closestDept.id);
+
+                const betweenDistance = distancesMatrix?.[farthestIndex]?.[closestIndex];
+                if (!Number.isFinite(betweenDistance)) {
+                  throw new Error(
+                    "Distance manquante pour le calcul du détour inversé."
+                  );
+                }
+
+                detourKm = betweenDistance;
+              }
 
               if (!isActive) return;
               setRouteMetrics({
@@ -2116,7 +2155,7 @@
           return () => {
             isActive = false;
           };
-        }, [optimalRoute]);
+        }, [activeRoute, isRouteReversed]);
 
         const bestTransporters = useMemo(() => {
           if (!selectedDepts.length || !truckType || !transporters.length) return [];
@@ -2124,14 +2163,50 @@
 
           const rankedResults = [];
 
+          const selectRateCost = (rate) => {
+            const parsedTarps = parseTariff(rate.tarpsCost);
+            const parsedFlatbed = parseTariff(rate.flatbedCost);
+
+            if (truckType === "bache") {
+              return {
+                available: parsedTarps.available,
+                value: parsedTarps.value,
+                label: "baché",
+              };
+            }
+
+            if (truckType === "plateau") {
+              return {
+                available: parsedFlatbed.available,
+                value: parsedFlatbed.value,
+                label: "plateau",
+              };
+            }
+
+            const candidates = [];
+            if (parsedTarps.available) {
+              candidates.push({ value: parsedTarps.value, label: "baché" });
+            }
+            if (parsedFlatbed.available) {
+              candidates.push({ value: parsedFlatbed.value, label: "plateau" });
+            }
+
+            if (!candidates.length) {
+              return { available: false };
+            }
+
+            const bestCandidate = candidates.sort((a, b) => a.value - b.value)[0];
+            return { available: true, value: bestCandidate.value, label: bestCandidate.label };
+          };
+
           for (const transporter of transporters) {
             let furthestCost = null;
             let furthestDeptDetail = "";
             const details = [];
             let hasMissingTariff = false;
 
-            for (let idx = 0; idx < optimalRoute.length; idx += 1) {
-              const dept = optimalRoute[idx];
+            for (let idx = 0; idx < activeRoute.length; idx += 1) {
+              const dept = activeRoute[idx];
               const rate = transporter.rates.find((r) => r.deptId === dept.id);
 
               if (!rate) {
@@ -2139,21 +2214,19 @@
                 break;
               }
 
-              const rawCost =
-                truckType === "bache" ? rate.tarpsCost : rate.flatbedCost;
-              const parsed = parseTariff(rawCost);
+              const selectedRate = selectRateCost(rate);
 
-              if (!parsed.available) {
+              if (!selectedRate.available) {
                 hasMissingTariff = true;
                 break;
               }
 
               details.push(
-                `${idx + 1}. ${dept.name} (${dept.km} km): ${parsed.value.toFixed(2)}€`
+                `${idx + 1}. ${dept.name} (${dept.km} km): ${selectedRate.value.toFixed(2)}€ (${selectedRate.label})`
               );
 
-              if (furthestCost === null || parsed.value >= furthestCost) {
-                furthestCost = parsed.value;
+              if (furthestCost === null || selectedRate.value >= furthestCost) {
+                furthestCost = selectedRate.value;
                 furthestDeptDetail = `${dept.name} (${dept.km} km)`;
               }
             }
@@ -2178,7 +2251,7 @@
 
             if (transporter.hasBreakOfCharge) {
               const breakCost = Number(transporter.breakOfChargeCost);
-              const breaksCount = Math.max(0, optimalRoute.length - 1);
+              const breaksCount = Math.max(0, activeRoute.length - 1);
 
               if (!Number.isFinite(breakCost) || breakCost < 0) {
                 continue;
@@ -2227,7 +2300,7 @@
           }
 
           return rankedResults.sort((a, b) => a.totalCost - b.totalCost);
-        }, [optimalRoute, routeMetrics, transporters, truckType]);
+        }, [activeRoute, routeMetrics, transporters, truckType]);
 
         useEffect(() => {
           const topLength = Math.min(3, bestTransporters.length);
@@ -2317,12 +2390,24 @@
           return numericDifference;
         };
 
-        const visibleLogs = useMemo(() => {
-          if (showAllLogs) {
+        const filteredLogs = useMemo(() => {
+          const normalizedSearch = logSearch.trim().toLowerCase();
+          if (!normalizedSearch) {
             return logs;
           }
-          return logs.slice(0, 5);
-        }, [logs, showAllLogs]);
+
+          return logs.filter((log) => {
+            const bordereauValue = (log.bordereau || "").toLowerCase();
+            return bordereauValue.includes(normalizedSearch);
+          });
+        }, [logSearch, logs]);
+
+        const visibleLogs = useMemo(() => {
+          if (showAllLogs) {
+            return filteredLogs;
+          }
+          return filteredLogs.slice(0, 5);
+        }, [filteredLogs, showAllLogs]);
 
         const scrollToResults = () => {
           if (resultsRef.current) {
@@ -2415,7 +2500,7 @@
             setValidationMessage("");
             setIsSavingLog(true);
 
-            const formattedDepartments = optimalRoute
+            const formattedDepartments = activeRoute
               .map((dept) => `${dept.code} - ${dept.name}`)
               .join(", ");
 
@@ -2446,7 +2531,7 @@
                   ? "Camion baché"
                   : truckType === "plateau"
                   ? "Camion plateau"
-                  : null,
+                  : "Type non spécifié",
               resultat: selectedChoice.transporter.name,
               choix_1: rankedChoices[0]
                 ? rankedChoices[0].transporter.name
@@ -2894,6 +2979,17 @@
                   Type de camion <span className="text-red-600">*</span>
                 </label>
                 <div className="flex gap-3 mb-4">
+                  <label className={`px-3 py-2 border rounded cursor-pointer ${truckType === "non-specifie" ? "bg-indigo-50 border-indigo-400" : ""}`}>
+                    <input
+                      type="radio"
+                      name="truck"
+                      value="non-specifie"
+                      checked={truckType === "non-specifie"}
+                      onChange={(e) => setTruckType(e.target.value)}
+                      className="mr-2"
+                    />
+                    Non spécifié (choix auto)
+                  </label>
                   <label className={`px-3 py-2 border rounded cursor-pointer ${truckType === "bache" ? "bg-indigo-50 border-indigo-400" : ""}`}>
                     <input
                       type="radio"
@@ -3015,13 +3111,25 @@
 
             {/* ======= SECTION TRAJET ======= */}
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-              <div className="flex items-center gap-3 mb-4">
-                <RouteIcon className="text-indigo-600" size={28} />
-                <h2 className="text-xl font-bold text-gray-800">Trajet</h2>
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-3">
+                  <RouteIcon className="text-indigo-600" size={28} />
+                  <h2 className="text-xl font-bold text-gray-800">Trajet</h2>
+                </div>
+                {activeRoute.length === 2 && (
+                  <button
+                    type="button"
+                    onClick={() => setIsRouteReversed((prev) => !prev)}
+                    className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800"
+                  >
+                    <ArrowUpDownIcon size={16} />
+                    Inverser l'ordre
+                  </button>
+                )}
               </div>
               {selectedDepts.length === 0 ? (
                 <p className="text-gray-500">Sélectionnez des départements pour visualiser l'ordre de livraison.</p>
-              ) : optimalRoute.length === 0 ? (
+              ) : activeRoute.length === 0 ? (
                 <p className="text-gray-500">Impossible de calculer l'itinéraire.</p>
               ) : (
                 <ol className="space-y-2 text-sm text-gray-700">
@@ -3033,7 +3141,7 @@
                       <strong>Départ :</strong> Sprimont
                     </div>
                   </li>
-                  {optimalRoute.map((dept, index) => (
+                  {activeRoute.map((dept, index) => (
                     <li key={dept.id} className="flex items-start gap-2">
                       <span className="inline-flex items-center justify-center w-6 h-6 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
                         {index + 1}
@@ -3042,11 +3150,11 @@
                         <div className="font-semibold">
                           {dept.code} - {dept.name}
                         </div>
-                      <div className="text-xs text-gray-500">{dept.km} km depuis Sprimont</div>
-                    </div>
-                  </li>
-                ))}
-              </ol>
+                        <div className="text-xs text-gray-500">{dept.km} km depuis Sprimont</div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
               )}
 
               {routeMetrics.loading && (
@@ -3288,9 +3396,25 @@
             )}
 
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800">Historique des recherches</h2>
-                {logsLoading && <span className="text-sm text-gray-500">Chargement...</span>}
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-bold text-gray-800">Historique des recherches</h2>
+                  {logsLoading && <span className="text-sm text-gray-500">Chargement...</span>}
+                </div>
+                <div className="relative w-full md:w-80">
+                  <SearchIcon
+                    size={16}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                  />
+                  <input
+                    type="text"
+                    value={logSearch}
+                    onChange={(e) => setLogSearch(e.target.value)}
+                    placeholder="Rechercher par bordereau"
+                    className="w-full border border-gray-300 rounded-lg py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                    autoComplete="off"
+                  />
+                </div>
               </div>
 
               {logsError && (
@@ -3301,6 +3425,10 @@
                 <p className="text-sm text-gray-500">
                   Aucune recherche enregistrée pour le moment. Lancez une recherche pour voir les
                   derniers résultats ici.
+                </p>
+              ) : !logsLoading && logs.length > 0 && filteredLogs.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  Aucun bordereau ne correspond à la recherche. Essayez un autre terme.
                 </p>
               ) : (
                 <>
@@ -3384,7 +3512,7 @@
                     ))}
                   </ul>
 
-                  {logs.length > 5 && (
+                  {filteredLogs.length > 5 && (
                     <div className="mt-4">
                       <button
                         onClick={() => setShowAllLogs((prev) => !prev)}
