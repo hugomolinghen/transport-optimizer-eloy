@@ -1644,6 +1644,7 @@
         const [logsError, setLogsError] = useState("");
         const [showAllLogs, setShowAllLogs] = useState(false);
         const [logSearch, setLogSearch] = useState("");
+        const [historyFilter, setHistoryFilter] = useState("all");
         const [isSearching, setIsSearching] = useState(false);
         const [isSavingLog, setIsSavingLog] = useState(false);
         const [showTransporters, setShowTransporters] = useState(false);
@@ -1694,6 +1695,28 @@
           if (type === "bache") return "Camion baché";
           if (type === "plateau") return "Camion plateau";
           return "Type non spécifié";
+        };
+
+        const parseDateValue = (value) => {
+          if (!value) return 0;
+          try {
+            return new Date(value).getTime();
+          } catch (err) {
+            return 0;
+          }
+        };
+
+        const sortHistoryEntries = (entries) => {
+          return [...entries].sort((a, b) => {
+            const dateA = parseDateValue(a.createdAt);
+            const dateB = parseDateValue(b.createdAt);
+
+            if (dateA !== dateB) {
+              return dateB - dateA;
+            }
+
+            return (b.supabaseId ? 1 : 0) - (a.supabaseId ? 1 : 0);
+          });
         };
 
         const formatDepartmentsList = (deptIds) =>
@@ -1748,7 +1771,7 @@
             setSearchHistory((prev) => {
               const nonSupabaseEntries = prev.filter((entry) => !entry.supabaseId);
               const supabaseEntries = (data || []).map(transformLogToHistoryEntry);
-              return [...nonSupabaseEntries, ...supabaseEntries];
+              return sortHistoryEntries([...nonSupabaseEntries, ...supabaseEntries]);
             });
           } catch (err) {
             console.error("❌ Erreur récupération logs :", err);
@@ -2490,17 +2513,25 @@
           };
         };
 
+        const sortedHistory = useMemo(
+          () => sortHistoryEntries(searchHistory),
+          [searchHistory]
+        );
+
         const filteredLogs = useMemo(() => {
           const normalizedSearch = logSearch.trim().toLowerCase();
-          if (!normalizedSearch) {
-            return searchHistory;
-          }
+          return sortedHistory.filter((log) => {
+            const matchesSearch = normalizedSearch
+              ? (log.bordereau || "").toLowerCase().includes(normalizedSearch)
+              : true;
+            const matchesFilter =
+              historyFilter === "all" ||
+              (historyFilter === "validated" && log.validated) ||
+              (historyFilter === "unvalidated" && !log.validated);
 
-          return searchHistory.filter((log) => {
-            const bordereauValue = (log.bordereau || "").toLowerCase();
-            return bordereauValue.includes(normalizedSearch);
+            return matchesSearch && matchesFilter;
           });
-        }, [logSearch, searchHistory]);
+        }, [logSearch, sortedHistory, historyFilter]);
 
         const visibleLogs = useMemo(() => {
           if (showAllLogs) {
@@ -2574,7 +2605,7 @@
             attributesLabel: buildAttributesLabel(truckType),
           };
 
-          setSearchHistory((prev) => [...prev, newSearch]);
+          setSearchHistory((prev) => sortHistoryEntries([newSearch, ...prev]));
           setActiveSearchId(newSearch.id);
           setCurrentResults(resultsSnapshot);
 
@@ -3590,9 +3621,38 @@
 
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xl font-bold text-gray-800">Historique des recherches</h2>
-                  {logsLoading && <span className="text-sm text-gray-500">Chargement...</span>}
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl font-bold text-gray-800">Historique des recherches</h2>
+                    {logsLoading && <span className="text-sm text-gray-500">Chargement...</span>}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {["all", "validated", "unvalidated"].map((value) => {
+                      const label =
+                        value === "all"
+                          ? "Toutes"
+                          : value === "validated"
+                          ? "Validées"
+                          : "Non validées";
+
+                      const isActive = historyFilter === value;
+
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setHistoryFilter(value)}
+                          className={`text-xs rounded-full border px-3 py-1 transition-colors ${
+                            isActive
+                              ? "bg-indigo-600 text-white border-indigo-600"
+                              : "bg-white text-gray-600 border-gray-200 hover:border-indigo-300 hover:text-indigo-700"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="relative w-full md:w-80">
                   <SearchIcon
