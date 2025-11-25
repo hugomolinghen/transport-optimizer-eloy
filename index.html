@@ -1667,6 +1667,7 @@
         const [isCreatingAccount, setIsCreatingAccount] = useState(false);
         const [isLoginPasswordVisible, setIsLoginPasswordVisible] = useState(false);
         const [isRegisterPasswordVisible, setIsRegisterPasswordVisible] = useState(false);
+        const [isRouteReversed, setIsRouteReversed] = useState(false);
 
         const handleDataRefresh = useCallback(() => {
           setDataReloadFlag((value) => value + 1);
@@ -1961,10 +1962,23 @@
         /********************************************
          *  CALCUL DU MEILLEUR TRANSPORTEUR
          ********************************************/
-        const optimalRoute = useMemo(
+        const baseRoute = useMemo(
           () => calculateOptimalRoute(selectedDepts, departments),
           [selectedDepts, departments]
         );
+
+        const optimalRoute = useMemo(() => {
+          if (isRouteReversed && baseRoute.length === 2) {
+            return [...baseRoute].reverse();
+          }
+          return baseRoute;
+        }, [baseRoute, isRouteReversed]);
+
+        useEffect(() => {
+          if (selectedDepts.length !== 2) {
+            setIsRouteReversed(false);
+          }
+        }, [selectedDepts]);
 
         const selectedDepartmentList = useMemo(() => {
           return selectedDepts
@@ -2089,7 +2103,21 @@
               }
 
               const totalDistanceKm = segmentDistanceSum;
-              const detourKm = Math.max(0, totalDistanceKm - directDistanceKm);
+              let detourKm = Math.max(0, totalDistanceKm - directDistanceKm);
+
+              if (isRouteReversed && optimalRoute.length === 2) {
+                const [firstDept, secondDept] = optimalRoute;
+                const kmValues = [
+                  Number(firstDept?.km),
+                  Number(secondDept?.km),
+                ].filter((value) => Number.isFinite(value));
+
+                if (kmValues.length === 2) {
+                  const closestKm = Math.min(...kmValues);
+                  const furthestKm = Math.max(...kmValues);
+                  detourKm = Math.max(0, furthestKm - closestKm);
+                }
+              }
 
               if (!isActive) return;
               setRouteMetrics({
@@ -3073,9 +3101,25 @@
 
             {/* ======= SECTION TRAJET ======= */}
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-              <div className="flex items-center gap-3 mb-4">
-                <RouteIcon className="text-indigo-600" size={28} />
-                <h2 className="text-xl font-bold text-gray-800">Trajet</h2>
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <RouteIcon className="text-indigo-600" size={28} />
+                  <h2 className="text-xl font-bold text-gray-800">Trajet</h2>
+                </div>
+                {optimalRoute.length === 2 && (
+                  <button
+                    onClick={() => setIsRouteReversed((prev) => !prev)}
+                    className={`inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-semibold transition-colors ${
+                      isRouteReversed
+                        ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                        : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                    }`}
+                    type="button"
+                  >
+                    <RefreshIcon size={16} />
+                    Inverser l'ordre des départements
+                  </button>
+                )}
               </div>
               {selectedDepts.length === 0 ? (
                 <p className="text-gray-500">Sélectionnez des départements pour visualiser l'ordre de livraison.</p>
