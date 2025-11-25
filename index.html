@@ -1637,11 +1637,14 @@
         const [authError, setAuthError] = useState("");
         const [email, setEmail] = useState("");
         const [password, setPassword] = useState("");
-        const [logs, setLogs] = useState([]);
+        const [searchHistory, setSearchHistory] = useState([]);
+        const [activeSearchId, setActiveSearchId] = useState(null);
+        const [currentResults, setCurrentResults] = useState([]);
         const [logsLoading, setLogsLoading] = useState(false);
         const [logsError, setLogsError] = useState("");
         const [showAllLogs, setShowAllLogs] = useState(false);
         const [logSearch, setLogSearch] = useState("");
+        const [historyFilter, setHistoryFilter] = useState("all");
         const [isSearching, setIsSearching] = useState(false);
         const [isSavingLog, setIsSavingLog] = useState(false);
         const [showTransporters, setShowTransporters] = useState(false);
@@ -1670,6 +1673,61 @@
         const [isLoginPasswordVisible, setIsLoginPasswordVisible] = useState(false);
         const [isRegisterPasswordVisible, setIsRegisterPasswordVisible] = useState(false);
 
+        const generateLocalId = () => {
+          if (typeof crypto !== "undefined" && crypto.randomUUID) {
+            return crypto.randomUUID();
+          }
+
+          return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        };
+
+        const buildResultsSnapshot = (results) =>
+          (results || []).map((result) => ({
+            transporter: {
+              id: result.transporter?.id,
+              name: result.transporter?.name || "",
+            },
+            totalCost: Number(result.totalCost) || 0,
+            details: Array.isArray(result.details) ? [...result.details] : [],
+          }));
+
+        const buildAttributesLabel = (type) => {
+          if (type === "bache") return "Camion baché";
+          if (type === "plateau") return "Camion plateau";
+          return "Type non spécifié";
+        };
+
+        const parseDateValue = (value) => {
+          if (!value) return 0;
+          try {
+            return new Date(value).getTime();
+          } catch (err) {
+            return 0;
+          }
+        };
+
+        const sortHistoryEntries = (entries) => {
+          return [...entries].sort((a, b) => {
+            const dateA = parseDateValue(a.createdAt);
+            const dateB = parseDateValue(b.createdAt);
+
+            if (dateA !== dateB) {
+              return dateB - dateA;
+            }
+
+            return (b.supabaseId ? 1 : 0) - (a.supabaseId ? 1 : 0);
+          });
+        };
+
+        const formatDepartmentsList = (deptIds) =>
+          (deptIds || [])
+            .map((deptId) =>
+              departments.find((dept) => dept.id === deptId)
+            )
+            .filter(Boolean)
+            .map((dept) => `${dept.code} - ${dept.name}`)
+            .join(", ");
+
         const handleDataRefresh = useCallback(() => {
           setDataReloadFlag((value) => value + 1);
         }, []);
@@ -1694,7 +1752,7 @@
 
         const fetchLogs = useCallback(async () => {
           if (!userIdentifier) {
-            setLogs([]);
+            setSearchHistory((prev) => prev.filter((entry) => !entry.supabaseId));
             setLogsError("");
             return;
           }
@@ -1710,7 +1768,11 @@
 
             if (error) throw error;
 
-            setLogs(data || []);
+            setSearchHistory((prev) => {
+              const nonSupabaseEntries = prev.filter((entry) => !entry.supabaseId);
+              const supabaseEntries = (data || []).map(transformLogToHistoryEntry);
+              return sortHistoryEntries([...nonSupabaseEntries, ...supabaseEntries]);
+            });
           } catch (err) {
             console.error("❌ Erreur récupération logs :", err);
             setLogsError(err.message || "Impossible de récupérer l'historique.");
@@ -1721,10 +1783,10 @@
 
         useEffect(() => {
           if (!userIdentifier) {
-            setLogs([]);
             setLogsError("");
             setLogsLoading(false);
             setShowAllLogs(false);
+            setSearchHistory((prev) => prev.filter((entry) => !entry.supabaseId));
             return;
           }
 
@@ -2303,7 +2365,7 @@
         }, [activeRoute, routeMetrics, transporters, truckType]);
 
         useEffect(() => {
-          const topLength = Math.min(3, bestTransporters.length);
+          const topLength = Math.min(3, currentResults.length);
 
           if (
             selectedResultIndex !== null &&
@@ -2335,7 +2397,7 @@
 
             return changed ? next : prev;
           });
-        }, [bestTransporters, selectedResultIndex]);
+        }, [currentResults, selectedResultIndex]);
 
         const formatTruckRate = (rawCost) => {
           const parsed = parseTariff(rawCost);
@@ -2390,17 +2452,86 @@
           return numericDifference;
         };
 
+        const transformLogToHistoryEntry = (log) => {
+          const resultsFromLog = [1, 2, 3]
+            .map((idx) => {
+              const choiceName = log[`choix_${idx}`];
+              const costValue = Number(log[`cout_${idx}`]);
+              const hasCost = Number.isFinite(costValue);
+
+              if (!choiceName && !hasCost) {
+                return null;
+              }
+
+              return {
+                transporter: { name: choiceName || `Transporteur ${idx}` },
+                totalCost: hasCost ? costValue : 0,
+                details: [
+                  hasCost
+                    ? `Tarif enregistré : ${costValue.toFixed(2)}€`
+                    : "Tarif indisponible dans l'historique",
+                ],
+              };
+            })
+            .filter(Boolean);
+
+          const selectedIndex = resultsFromLog.findIndex(
+            (result) =>
+              result.transporter.name &&
+              log.resultat &&
+              result.transporter.name.toLowerCase() === log.resultat.toLowerCase()
+          );
+
+          const reasonsFromLog = {};
+          ["raison_1", "raison_2", "raison_3"].forEach((key, idx) => {
+            if (log[key]) {
+              reasonsFromLog[idx] = log[key];
+            }
+          });
+
+          const attributesRaw = (log.attributs || "").toLowerCase();
+          const truckTypeFromLog = attributesRaw.includes("bach")
+            ? "bache"
+            : attributesRaw.includes("plateau")
+            ? "plateau"
+            : "non-specifie";
+
+          return {
+            id: log.id ? `log-${log.id}` : generateLocalId(),
+            supabaseId: log.id || null,
+            bordereau: log.bordereau || "",
+            selectedDepts: [],
+            truckType: truckTypeFromLog,
+            formattedDepartments: log.departements || "",
+            attributesLabel: log.attributs || buildAttributesLabel(truckTypeFromLog),
+            createdAt: log.date_recherche || log.created_at || new Date().toISOString(),
+            validated: true,
+            results: resultsFromLog,
+            selectedResultIndex: selectedIndex >= 0 ? selectedIndex : null,
+            reasons: reasonsFromLog,
+            difference: formatDifferenceValue(log.difference),
+          };
+        };
+
+        const sortedHistory = useMemo(
+          () => sortHistoryEntries(searchHistory),
+          [searchHistory]
+        );
+
         const filteredLogs = useMemo(() => {
           const normalizedSearch = logSearch.trim().toLowerCase();
-          if (!normalizedSearch) {
-            return logs;
-          }
+          return sortedHistory.filter((log) => {
+            const matchesSearch = normalizedSearch
+              ? (log.bordereau || "").toLowerCase().includes(normalizedSearch)
+              : true;
+            const matchesFilter =
+              historyFilter === "all" ||
+              (historyFilter === "validated" && log.validated) ||
+              (historyFilter === "unvalidated" && !log.validated);
 
-          return logs.filter((log) => {
-            const bordereauValue = (log.bordereau || "").toLowerCase();
-            return bordereauValue.includes(normalizedSearch);
+            return matchesSearch && matchesFilter;
           });
-        }, [logSearch, logs]);
+        }, [logSearch, sortedHistory, historyFilter]);
 
         const visibleLogs = useMemo(() => {
           if (showAllLogs) {
@@ -2408,6 +2539,42 @@
           }
           return filteredLogs.slice(0, 5);
         }, [filteredLogs, showAllLogs]);
+
+        const activeSearch = useMemo(
+          () => searchHistory.find((entry) => entry.id === activeSearchId) || null,
+          [searchHistory, activeSearchId]
+        );
+
+        const updateActiveSearch = useCallback(
+          (updater) => {
+            if (!activeSearchId) return;
+
+            setSearchHistory((prev) =>
+              prev.map((entry) => {
+                if (entry.id !== activeSearchId) {
+                  return entry;
+                }
+
+                const updates =
+                  typeof updater === "function" ? updater(entry) : updater;
+                return { ...entry, ...updates };
+              })
+            );
+          },
+          [activeSearchId]
+        );
+
+        useEffect(() => {
+          if (!activeSearch) return;
+
+          setCurrentResults(activeSearch.results || []);
+          setSelectedResultIndex(
+            activeSearch.selectedResultIndex !== undefined
+              ? activeSearch.selectedResultIndex
+              : null
+          );
+          setReasons(activeSearch.reasons || {});
+        }, [activeSearch]);
 
         const scrollToResults = () => {
           if (resultsRef.current) {
@@ -2423,10 +2590,74 @@
           setValidationMessage("");
           setIsSearching(true);
 
+          const resultsSnapshot = buildResultsSnapshot(bestTransporters);
+          const newSearch = {
+            id: generateLocalId(),
+            bordereau,
+            selectedDepts: [...selectedDepts],
+            truckType,
+            createdAt: new Date().toISOString(),
+            validated: false,
+            results: resultsSnapshot,
+            selectedResultIndex: null,
+            reasons: {},
+            formattedDepartments: formatDepartmentsList(selectedDepts),
+            attributesLabel: buildAttributesLabel(truckType),
+          };
+
+          setSearchHistory((prev) => sortHistoryEntries([newSearch, ...prev]));
+          setActiveSearchId(newSearch.id);
+          setCurrentResults(resultsSnapshot);
+
           setTimeout(() => {
             scrollToResults();
             setIsSearching(false);
           }, 150);
+        };
+
+        const handleHistorySelect = (entryId) => {
+          const selectedEntry = searchHistory.find((entry) => entry.id === entryId);
+          if (!selectedEntry) return;
+
+          setActiveSearchId(entryId);
+          setHasSearched(true);
+          setSelectedDepts(selectedEntry.selectedDepts || []);
+          setTruckType(selectedEntry.truckType || "non-specifie");
+          setBordereau(selectedEntry.bordereau || "");
+          setSelectedResultIndex(
+            selectedEntry.selectedResultIndex !== undefined
+              ? selectedEntry.selectedResultIndex
+              : null
+          );
+          setReasons(selectedEntry.reasons || {});
+          setCurrentResults(selectedEntry.results || []);
+
+          scrollToResults();
+        };
+
+        const handleResultSelection = (index) => {
+          setSelectedResultIndex((prev) => {
+            const next = prev === index ? null : index;
+            updateActiveSearch({ selectedResultIndex: next });
+            return next;
+          });
+          setValidationError("");
+          setValidationMessage("");
+        };
+
+        const handleReasonChange = (idx, value) => {
+          setReasons((prev) => {
+            const next = { ...prev };
+            if (value) {
+              next[idx] = value;
+            } else {
+              delete next[idx];
+            }
+            updateActiveSearch({ reasons: next });
+            return next;
+          });
+          setValidationError("");
+          setValidationMessage("");
         };
 
         const handleDepartmentSearchKeyDown = useCallback(
@@ -2478,8 +2709,14 @@
         }, []);
 
         const handleValidate = async () => {
-          if (!bestTransporters.length) {
+          if (!currentResults.length || !activeSearch) {
             setValidationError("Aucun résultat à valider.");
+            return;
+          }
+
+          if (activeSearch.validated) {
+            setValidationMessage("Cette recherche est déjà validée.");
+            setValidationError("");
             return;
           }
 
@@ -2500,13 +2737,13 @@
             setValidationMessage("");
             setIsSavingLog(true);
 
-            const formattedDepartments = activeRoute
-              .map((dept) => `${dept.code} - ${dept.name}`)
-              .join(", ");
+            const formattedDepartments =
+              activeSearch.formattedDepartments ||
+              formatDepartmentsList(activeSearch.selectedDepts);
 
-            const rankedChoices = bestTransporters.slice(0, 3);
+            const rankedChoices = (currentResults || []).slice(0, 3);
             const selectedChoice = rankedChoices[selectedResultIndex];
-            const bestChoice = bestTransporters[0] || null;
+            const bestChoice = currentResults[0] || null;
             const differenceValue =
               bestChoice && selectedChoice
                 ? Math.max(
@@ -2527,11 +2764,8 @@
               bordereau,
               departements: formattedDepartments || null,
               attributs:
-                truckType === "bache"
-                  ? "Camion baché"
-                  : truckType === "plateau"
-                  ? "Camion plateau"
-                  : "Type non spécifié",
+                activeSearch.attributesLabel ||
+                buildAttributesLabel(activeSearch.truckType),
               resultat: selectedChoice.transporter.name,
               choix_1: rankedChoices[0]
                 ? rankedChoices[0].transporter.name
@@ -2567,7 +2801,7 @@
             }
 
             setValidationMessage("Résultat enregistré avec succès.");
-            await fetchLogs();
+            updateActiveSearch({ validated: true });
           } catch (err) {
             console.error("❌ Erreur lors de l'enregistrement du log :", err);
             setValidationError(
@@ -3247,7 +3481,7 @@
             </div>
 
             {/* ======= RÉSULTATS DU CALCUL ======= */}
-            {hasSearched && bestTransporters.length > 0 && (
+            {hasSearched && currentResults.length > 0 && (
               <div
                 ref={resultsRef}
                 id="resultats"
@@ -3264,10 +3498,15 @@
                     disabled={
                       isSavingLog ||
                       selectedResultIndex === null ||
-                      !bestTransporters.length
+                      !currentResults.length ||
+                      activeSearch?.validated
                     }
                   >
-                    {isSavingLog ? "Validation..." : "Valider"}
+                    {activeSearch?.validated
+                      ? "Déjà validé"
+                      : isSavingLog
+                      ? "Validation..."
+                      : "Valider"}
                   </button>
                 </div>
 
@@ -3283,13 +3522,15 @@
                   </div>
                 )}
 
-                {bestTransporters.slice(0, 3).map((result, index) => {
+                {currentResults.slice(0, 3).map((result, index) => {
                   const isSelected = selectedResultIndex === index;
                   const reasonValue = reasons[index] || "";
+                  const resultKey =
+                    result.transporter.id || result.transporter.name || index;
 
                   return (
                     <div
-                      key={result.transporter.id}
+                      key={resultKey}
                       className={`p-6 rounded-lg border-2 mb-4 transition-colors ${
                         isSelected
                           ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200"
@@ -3335,13 +3576,8 @@
                               type="checkbox"
                               className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                               checked={isSelected}
-                              onChange={() => {
-                                setSelectedResultIndex((prev) =>
-                                  prev === index ? null : index
-                                );
-                                setValidationError("");
-                                setValidationMessage("");
-                              }}
+                              onChange={() => handleResultSelection(index)}
+                              disabled={activeSearch?.validated}
                             />
                             Utiliser ce transporteur
                           </label>
@@ -3350,21 +3586,9 @@
                           </label>
                           <select
                             value={reasonValue}
-                            onChange={(e) => {
-                              const { value } = e.target;
-                              setReasons((prev) => {
-                                const next = { ...prev };
-                                if (value) {
-                                  next[index] = value;
-                                } else {
-                                  delete next[index];
-                                }
-                                return next;
-                              });
-                              setValidationError("");
-                              setValidationMessage("");
-                            }}
+                            onChange={(e) => handleReasonChange(index, e.target.value)}
                             className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                            disabled={activeSearch?.validated}
                           >
                             <option value="">Sélectionner une raison</option>
                             {NON_SELECTION_REASONS.map((reason) => (
@@ -3380,7 +3604,7 @@
                 })}
               </div>
             )}
-            {hasSearched && selectedDepts.length > 0 && bestTransporters.length === 0 && (
+            {hasSearched && currentResults.length === 0 && (
               <div
                 ref={resultsRef}
                 id="resultats"
@@ -3397,9 +3621,38 @@
 
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xl font-bold text-gray-800">Historique des recherches</h2>
-                  {logsLoading && <span className="text-sm text-gray-500">Chargement...</span>}
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl font-bold text-gray-800">Historique des recherches</h2>
+                    {logsLoading && <span className="text-sm text-gray-500">Chargement...</span>}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {["all", "validated", "unvalidated"].map((value) => {
+                      const label =
+                        value === "all"
+                          ? "Toutes"
+                          : value === "validated"
+                          ? "Validées"
+                          : "Non validées";
+
+                      const isActive = historyFilter === value;
+
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setHistoryFilter(value)}
+                          className={`text-xs rounded-full border px-3 py-1 transition-colors ${
+                            isActive
+                              ? "bg-indigo-600 text-white border-indigo-600"
+                              : "bg-white text-gray-600 border-gray-200 hover:border-indigo-300 hover:text-indigo-700"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="relative w-full md:w-80">
                   <SearchIcon
@@ -3421,12 +3674,12 @@
                 <div className="bg-red-50 text-red-600 text-sm p-3 rounded mb-4">{logsError}</div>
               )}
 
-              {!logsLoading && logs.length === 0 ? (
+              {!logsLoading && searchHistory.length === 0 ? (
                 <p className="text-sm text-gray-500">
                   Aucune recherche enregistrée pour le moment. Lancez une recherche pour voir les
                   derniers résultats ici.
                 </p>
-              ) : !logsLoading && logs.length > 0 && filteredLogs.length === 0 ? (
+              ) : !logsLoading && searchHistory.length > 0 && filteredLogs.length === 0 ? (
                 <p className="text-sm text-gray-500">
                   Aucun bordereau ne correspond à la recherche. Essayez un autre terme.
                 </p>
@@ -3434,62 +3687,80 @@
                 <>
                   <ul className="space-y-4">
                     {visibleLogs.map((log) => (
-                      <li key={log.id} className="border border-gray-200 rounded-lg p-4">
-                        <div className="flex items-center justify-between text-sm text-gray-500 mb-2">
-                          <span className="font-medium text-gray-700">{log.bordereau}</span>
-                          <span>{formatLogDate(log.date_recherche)}</span>
+                      <li
+                        key={log.id}
+                        className={`border rounded-lg p-4 cursor-pointer transition-colors ${
+                          activeSearchId === log.id
+                            ? "border-indigo-300 bg-indigo-50"
+                            : "border-gray-200"
+                        }`}
+                        onClick={() => handleHistorySelect(log.id)}
+                      >
+                        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between text-sm text-gray-500 mb-2">
+                          <div className="flex items-center gap-2 text-gray-700 font-medium">
+                            <span>{log.bordereau || "Bordereau non renseigné"}</span>
+                            <span
+                              className={`text-xs px-2 py-1 rounded-full border ${
+                                log.validated
+                                  ? "bg-green-100 text-green-700 border-green-200"
+                                  : "bg-yellow-50 text-yellow-700 border-yellow-200"
+                              }`}
+                            >
+                              {log.validated ? "Validée" : "Non validée"}
+                            </span>
+                          </div>
+                          <span>{formatLogDate(log.createdAt)}</span>
                         </div>
+                        {log.formattedDepartments && (
+                          <p className="text-sm text-gray-700">
+                            <span className="font-semibold">Départements :</span> {log.formattedDepartments}
+                          </p>
+                        )}
+                        <p className="text-sm text-gray-700">
+                          <span className="font-semibold">Type :</span> {log.attributesLabel || buildAttributesLabel(log.truckType)}
+                        </p>
+                        {log.difference !== null && log.difference !== undefined && (
+                          <p className="text-sm text-gray-700">
+                            <span className="font-semibold">Écart :</span> {Number(log.difference).toFixed(2)}€
+                          </p>
+                        )}
                         {(() => {
-                          const differenceValue = formatDifferenceValue(
-                            log.difference
-                          );
-                          if (differenceValue === null) {
-                            return null;
-                          }
+                          const selectedResult =
+                            log.selectedResultIndex !== null &&
+                            log.selectedResultIndex !== undefined &&
+                            log.results?.[log.selectedResultIndex]
+                              ? log.results[log.selectedResultIndex]
+                              : log.results?.[0];
+
+                          if (!selectedResult) return null;
+
                           return (
                             <p className="text-sm text-gray-700">
-                              <span className="font-semibold">Écart :</span> {differenceValue.toFixed(2)}€
+                              <span className="font-semibold">Résultat :</span>{" "}
+                              {formatChoiceDisplay(
+                                selectedResult.transporter?.name,
+                                selectedResult.totalCost
+                              ) || selectedResult.transporter?.name || "—"}
                             </p>
                           );
                         })()}
-                        {log.departements && (
-                          <p className="text-sm text-gray-700">
-                            <span className="font-semibold">Départements :</span> {log.departements}
-                          </p>
-                        )}
-                        {log.attributs && (
-                          <p className="text-sm text-gray-700">
-                            <span className="font-semibold">Type :</span> {log.attributs}
-                          </p>
-                        )}
-                        {log.resultat && (
-                          <p className="text-sm text-gray-700">
-                            <span className="font-semibold">Résultat :</span> {log.resultat}
-                          </p>
-                        )}
-                        {([1, 2, 3].some((idx) =>
-                          log[`choix_${idx}`] ||
-                          log[`cout_${idx}`] ||
-                          log[`raison_${idx}`]
-                        )) && (
+
+                        {log.results?.length > 0 && (
                           <ul className="mt-3 space-y-2 text-sm text-gray-600">
-                            {[1, 2, 3].map((idx) => {
-                              const choice = log[`choix_${idx}`];
-                              const cost = log[`cout_${idx}`];
-                              const reason = log[`raison_${idx}`];
+                            {log.results.slice(0, 3).map((result, idx) => {
+                              const prefix = idx === 0 ? "1️⃣" : idx === 1 ? "2️⃣" : "3️⃣";
+                              const reason = log.reasons?.[idx];
                               const display =
-                                formatChoiceDisplay(choice, cost) ||
-                                (reason ? "—" : null);
+                                formatChoiceDisplay(
+                                  result.transporter?.name,
+                                  result.totalCost
+                                ) || (reason ? "—" : null);
 
-                              if (!display && !reason) {
-                                return null;
-                              }
-
-                              const prefix = idx === 1 ? "1️⃣" : idx === 2 ? "2️⃣" : "3️⃣";
+                              if (!display && !reason) return null;
 
                               return (
                                 <li
-                                  key={idx}
+                                  key={`${log.id}-${idx}`}
                                   className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
                                 >
                                   <div className="font-medium text-gray-700">
