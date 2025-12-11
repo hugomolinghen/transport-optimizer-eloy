@@ -1826,19 +1826,17 @@
         const DYNAMICS_ORDER_REGEX = /^FR-(20\d{2})-\d{5}$/;
         const DELIVERY_TIME_REGEX = /^([01]\d|2[0-3]):(00|15|30|45)$/;
 
-        const premiumTimeOptions = useMemo(() => {
-          const options = [];
+        const premiumHours = useMemo(
+          () =>
+            Array.from({ length: 24 }, (_, hour) =>
+              String(hour).padStart(2, "0")
+            ),
+          []
+        );
+        const premiumMinutes = ["00", "15", "30", "45"];
 
-          for (let hour = 0; hour < 24; hour += 1) {
-            for (const minute of [0, 15, 30, 45]) {
-              const labelHour = String(hour).padStart(2, "0");
-              const labelMinute = String(minute).padStart(2, "0");
-              options.push(`${labelHour}:${labelMinute}`);
-            }
-          }
-
-          return options;
-        }, []);
+        const [premiumHour, setPremiumHour] = useState("");
+        const [premiumMinute, setPremiumMinute] = useState("00");
 
         const computeNextDay = (dateString) => {
           const parsedDate = new Date(dateString);
@@ -1873,6 +1871,18 @@
             setLoadingDate(computePreviousDay(deliveryDate));
           }
         }, [deliveryDate, loadingDate]);
+
+        useEffect(() => {
+          if (DELIVERY_TIME_REGEX.test(deliveryTime)) {
+            const [hour, minute] = deliveryTime.split(":");
+            setPremiumHour(hour);
+            setPremiumMinute(minute);
+            return;
+          }
+
+          setPremiumHour("");
+          setPremiumMinute("00");
+        }, [deliveryTime]);
 
         useEffect(() => {
           setDeliveryTime((previous) => {
@@ -3437,20 +3447,49 @@
                     Horaire de livraison <span className="text-red-600">*</span>
                   </label>
                   {isPremium ? (
-                    <select
-                      value={deliveryTime}
-                      onChange={(event) => setDeliveryTime(event.target.value)}
-                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="" disabled>
-                        Sélectionnez un horaire (par quart d'heure)
-                      </option>
-                      {premiumTimeOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={premiumHour}
+                        onChange={(event) => {
+                          const newHour = event.target.value;
+                          setPremiumHour(newHour);
+                          setDeliveryTime(
+                            newHour
+                              ? `${newHour}:${premiumMinute || "00"}`
+                              : ""
+                          );
+                        }}
+                        className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="" disabled>
+                          Heure (00-23)
                         </option>
-                      ))}
-                    </select>
+                        {premiumHours.map((hourOption) => (
+                          <option key={hourOption} value={hourOption}>
+                            {hourOption} h
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={premiumMinute}
+                        onChange={(event) => {
+                          const newMinute = event.target.value;
+                          setPremiumMinute(newMinute);
+                          setDeliveryTime(
+                            premiumHour
+                              ? `${premiumHour}:${newMinute}`
+                              : ""
+                          );
+                        }}
+                        className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                      >
+                        {premiumMinutes.map((minuteOption) => (
+                          <option key={minuteOption} value={minuteOption}>
+                            {minuteOption} min
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   ) : (
                     <select
                       value={deliveryTime || "matin"}
