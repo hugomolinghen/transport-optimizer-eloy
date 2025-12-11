@@ -1632,6 +1632,10 @@
         const [selectedDepts, setSelectedDepts] = useState([]);
         const [truckType, setTruckType] = useState("non-specifie"); // "bache", "plateau" ou "non-specifie"
         const [bordereau, setBordereau] = useState("");
+        const [isPremium, setIsPremium] = useState(false);
+        const [loadingDate, setLoadingDate] = useState("");
+        const [deliveryDate, setDeliveryDate] = useState("");
+        const [deliveryTime, setDeliveryTime] = useState("");
         const [hasSearched, setHasSearched] = useState(false);
         const [session, setSession] = useState(null);
         const [authLoading, setAuthLoading] = useState(true);
@@ -1653,6 +1657,7 @@
         const [reasons, setReasons] = useState({});
         const [validationError, setValidationError] = useState("");
         const [validationMessage, setValidationMessage] = useState("");
+        const [copyEmailMessage, setCopyEmailMessage] = useState("");
         const [routeMetrics, setRouteMetrics] = useState({
           totalDistanceKm: 0,
           detourKm: 0,
@@ -1700,14 +1705,8 @@
           return "Type non spécifié";
         };
 
-        const buildMailtoLink = (transporterName) => {
+        const buildEmailContent = (transporterName) => {
           const recipient = transporterName || "Transporteur";
-          const subjectParts = ["Demande de transport"];
-          if (bordereau) {
-            subjectParts.push(`Bordereau ${bordereau}`);
-          }
-
-          const subject = subjectParts.join(" - ");
           const deliveryDepartments = (activeRoute.length
             ? activeRoute
             : selectedDepartmentList
@@ -1717,10 +1716,26 @@
             `Bonjour ${recipient},`,
             "",
             bordereau
-              ? `Nous souhaitons organiser le transport pour le bordereau ${bordereau}.`
-              : "Nous souhaitons organiser un transport (bordereau à préciser).",
+              ? `Nous souhaitons organiser le transport pour la commande ${bordereau}.`
+              : "Nous souhaitons organiser un transport (référence commande à préciser).",
             `Type de camion : ${buildAttributesLabel(truckType)}.`,
           ];
+
+          if (isPremium) {
+            bodyLines.push("Transport premium : Oui.");
+          }
+
+          if (loadingDate) {
+            bodyLines.push(`Date de chargement : ${loadingDate}.`);
+          }
+
+          if (deliveryDate) {
+            bodyLines.push(`Date de livraison : ${deliveryDate}.`);
+          }
+
+          if (deliveryTime) {
+            bodyLines.push(`Horaire de livraison : ${deliveryTime}.`);
+          }
 
           if (deliveryDepartments.length) {
             bodyLines.push("Départements à livrer :", ...deliveryDepartments);
@@ -1732,11 +1747,49 @@
             "Merci d'avance."
           );
 
-          const body = bodyLines.join("\n");
+          return {
+            body: bodyLines.join("\n"),
+          };
+        };
 
-          return `mailto:${encodeURIComponent(
-            recipient
-          )}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        const handleCopyEmail = async (transporterName) => {
+          const { body } = buildEmailContent(transporterName);
+          const emailText = body;
+          const setMessage = (message) => {
+            setCopyEmailMessage(message);
+            setTimeout(() => setCopyEmailMessage(""), 4000);
+          };
+
+          try {
+            if (navigator?.clipboard?.writeText) {
+              await navigator.clipboard.writeText(emailText);
+              setMessage("Email copié dans le presse-papiers.");
+              return;
+            }
+            throw new Error("Clipboard API non disponible");
+          } catch (err) {
+            try {
+              const textarea = document.createElement("textarea");
+              textarea.value = emailText;
+              textarea.setAttribute("readonly", "");
+              textarea.style.position = "absolute";
+              textarea.style.left = "-9999px";
+              document.body.appendChild(textarea);
+              textarea.select();
+              textarea.setSelectionRange(0, emailText.length);
+              const success = document.execCommand("copy");
+              document.body.removeChild(textarea);
+
+              if (success) {
+                setMessage("Email copié dans le presse-papiers.");
+              } else {
+                setMessage("Impossible de copier l'email. Merci de copier manuellement.");
+              }
+            } catch (copyErr) {
+              console.error("❌ Erreur lors de la copie de l'email :", copyErr);
+              setMessage("Impossible de copier l'email. Merci de copier manuellement.");
+            }
+          }
         };
 
         const parseDateValue = (value) => {
@@ -1807,14 +1860,80 @@
           setDataReloadFlag((value) => value + 1);
         }, []);
 
+        const DYNAMICS_ORDER_REGEX = /^FR-(20\d{2})-\d{5}$/;
+        const DELIVERY_TIME_REGEX = /^([01]\d|2[0-3]):(00|15|30|45)$/;
+
+        const premiumHours = useMemo(
+          () =>
+            Array.from({ length: 24 }, (_, hour) =>
+              String(hour).padStart(2, "0")
+            ),
+          []
+        );
+        const premiumMinutes = ["00", "15", "30", "45"];
+
+        const [premiumHour, setPremiumHour] = useState("");
+        const [premiumMinute, setPremiumMinute] = useState("00");
+
+        const computeNextDay = (dateString) => {
+          const parsedDate = new Date(dateString);
+          if (Number.isNaN(parsedDate)) return "";
+
+          parsedDate.setDate(parsedDate.getDate() + 1);
+          return parsedDate.toISOString().slice(0, 10);
+        };
+
+        const computePreviousDay = (dateString) => {
+          const parsedDate = new Date(dateString);
+          if (Number.isNaN(parsedDate)) return "";
+
+          parsedDate.setDate(parsedDate.getDate() - 1);
+          return parsedDate.toISOString().slice(0, 10);
+        };
+
         useEffect(() => {
           if (selectedDepts.length !== 2) {
             setIsRouteReversed(false);
           }
         }, [selectedDepts]);
 
-        const currentYear = new Date().getFullYear();
-        const BORDEREAU_REGEX = /^23\/(20\d{2})\/(?!0000)\d{4}$/;
+        useEffect(() => {
+          if (loadingDate && !deliveryDate) {
+            setDeliveryDate(computeNextDay(loadingDate));
+          }
+        }, [loadingDate, deliveryDate]);
+
+        useEffect(() => {
+          if (deliveryDate && !loadingDate) {
+            setLoadingDate(computePreviousDay(deliveryDate));
+          }
+        }, [deliveryDate, loadingDate]);
+
+        useEffect(() => {
+          if (DELIVERY_TIME_REGEX.test(deliveryTime)) {
+            const [hour, minute] = deliveryTime.split(":");
+            setPremiumHour(hour);
+            setPremiumMinute(minute);
+            return;
+          }
+
+          setPremiumHour("");
+          setPremiumMinute("00");
+        }, [deliveryTime]);
+
+        useEffect(() => {
+          setDeliveryTime((previous) => {
+            if (isPremium) {
+              return DELIVERY_TIME_REGEX.test(previous) ? previous : "";
+            }
+
+            if (previous === "matin" || previous === "soir") {
+              return previous;
+            }
+
+            return "matin";
+          });
+        }, [isPremium]);
 
         const userIdentifier = session?.user?.id || session?.user?.email || null;
         const userDisplayName =
@@ -2575,6 +2694,10 @@
             id: log.id ? `log-${log.id}` : generateLocalId(),
             supabaseId: log.id || null,
             bordereau: log.bordereau || "",
+            isPremium: Boolean(log.transport_premium),
+            loadingDate: log.date_chargement || "",
+            deliveryDate: log.date_livraison || "",
+            deliveryTime: log.horaire_livraison || "",
             selectedDepts: [],
             truckType: truckTypeFromLog,
             formattedDepartments: log.departements || "",
@@ -2657,6 +2780,15 @@
           }
         };
 
+        const isOrderNumberValid = DYNAMICS_ORDER_REGEX.test(bordereau);
+        const isLoadingDateValid = Boolean(loadingDate);
+        const isDeliveryDateValid =
+          Boolean(deliveryDate) &&
+          (!loadingDate || new Date(deliveryDate) >= new Date(loadingDate));
+        const isDeliveryTimeValid = isPremium
+          ? DELIVERY_TIME_REGEX.test(deliveryTime)
+          : deliveryTime === "matin" || deliveryTime === "soir";
+
         const handleSearch = () => {
           setHasSearched(true);
           setSelectedResultIndex(null);
@@ -2671,6 +2803,10 @@
             bordereau,
             selectedDepts: [...selectedDepts],
             truckType,
+            isPremium,
+            loadingDate,
+            deliveryDate,
+            deliveryTime,
             createdAt: new Date().toISOString(),
             validated: false,
             results: resultsSnapshot,
@@ -2699,6 +2835,10 @@
           setSelectedDepts(selectedEntry.selectedDepts || []);
           setTruckType(selectedEntry.truckType || "non-specifie");
           setBordereau(selectedEntry.bordereau || "");
+          setIsPremium(Boolean(selectedEntry.isPremium));
+          setLoadingDate(selectedEntry.loadingDate || "");
+          setDeliveryDate(selectedEntry.deliveryDate || "");
+          setDeliveryTime(selectedEntry.deliveryTime || "");
           setSelectedResultIndex(
             selectedEntry.selectedResultIndex !== undefined
               ? selectedEntry.selectedResultIndex
@@ -3271,17 +3411,140 @@
               <div className="bg-white rounded-xl shadow-lg p-6">
                 <h2 className="text-lg font-semibold mb-4">Critères</h2>
 
-                {/* Bordereau */}
+                {/* Numéro de commande Dynamics */}
                 <label className="block mb-1 text-sm font-medium text-gray-700">
-                  Bordereau <span className="text-red-600">*</span>
+                  Numéro de commande Dynamics <span className="text-red-600">*</span>
                 </label>
                 <input
                   type="text"
-                  placeholder={`23/${currentYear}/####`}
+                  placeholder="FR-2025-00638"
                   value={bordereau}
-                  onChange={(e) => setBordereau(e.target.value)}
+                  onChange={(e) =>
+                    setBordereau(e.target.value.trim().toUpperCase())
+                  }
                   className="w-full border px-3 py-2 rounded mb-3 focus:ring-2 focus:ring-indigo-500"
                 />
+                {bordereau && !isOrderNumberValid && (
+                  <p className="text-xs text-red-600 -mt-2 mb-3">
+                    Format attendu : FR-AAAA-##### (exemple : FR-2025-00638).
+                  </p>
+                )}
+
+                {/* Transport premium */}
+                <div className="flex items-center gap-2 mb-3">
+                  <input
+                    id="premium-toggle"
+                    type="checkbox"
+                    checked={isPremium}
+                    onChange={(event) => setIsPremium(event.target.checked)}
+                    className="h-4 w-4 text-indigo-600"
+                  />
+                  <label
+                    htmlFor="premium-toggle"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Transport premium
+                  </label>
+                </div>
+
+                {/* Dates de chargement et livraison */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="block mb-1 text-sm font-medium text-gray-700">
+                      Date de chargement <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={loadingDate}
+                      onChange={(event) => setLoadingDate(event.target.value)}
+                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 text-sm font-medium text-gray-700">
+                      Date de livraison <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={deliveryDate}
+                      onChange={(event) => setDeliveryDate(event.target.value)}
+                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+                {loadingDate && deliveryDate && !isDeliveryDateValid && (
+                  <p className="text-xs text-red-600 -mt-2 mb-3">
+                    La date de livraison doit être identique ou postérieure à la date de chargement.
+                  </p>
+                )}
+
+                {/* Horaire de livraison */}
+                <div className="mb-4">
+                  <label className="block mb-1 text-sm font-medium text-gray-700">
+                    Horaire de livraison <span className="text-red-600">*</span>
+                  </label>
+                  {isPremium ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={premiumHour}
+                        onChange={(event) => {
+                          const newHour = event.target.value;
+                          setPremiumHour(newHour);
+                          setDeliveryTime(
+                            newHour
+                              ? `${newHour}:${premiumMinute || "00"}`
+                              : ""
+                          );
+                        }}
+                        className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="" disabled>
+                          Heure (00-23)
+                        </option>
+                        {premiumHours.map((hourOption) => (
+                          <option key={hourOption} value={hourOption}>
+                            {hourOption} h
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={premiumMinute}
+                        onChange={(event) => {
+                          const newMinute = event.target.value;
+                          setPremiumMinute(newMinute);
+                          setDeliveryTime(
+                            premiumHour
+                              ? `${premiumHour}:${newMinute}`
+                              : ""
+                          );
+                        }}
+                        className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                      >
+                        {premiumMinutes.map((minuteOption) => (
+                          <option key={minuteOption} value={minuteOption}>
+                            {minuteOption} min
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <select
+                      value={deliveryTime || "matin"}
+                      onChange={(event) => setDeliveryTime(event.target.value)}
+                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="matin">Matin</option>
+                      <option value="soir">Soir</option>
+                    </select>
+                  )}
+                  {!isDeliveryTimeValid && (
+                    <p className="text-xs text-red-600 mt-1">
+                      {isPremium
+                        ? "Indiquez une heure valide (format HH:MM, par quart d'heure)."
+                        : "Choisissez Matin ou Soir."}
+                    </p>
+                  )}
+                </div>
 
                 {/* Type de camion */}
                 <label className="block mb-2 text-sm font-medium text-gray-700">
@@ -3327,11 +3590,14 @@
                   onClick={handleSearch}
                   className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-60"
                   disabled=
-                    {(!BORDEREAU_REGEX.test(bordereau) ||
+                    {!isOrderNumberValid ||
+                      !isLoadingDateValid ||
+                      !isDeliveryDateValid ||
+                      !isDeliveryTimeValid ||
                       !truckType ||
                       !selectedDepts.length ||
                       isSearching ||
-                      isSavingLog)}
+                      isSavingLog}
                 >
                   {isSearching ? (
                     "Recherche..."
@@ -3597,6 +3863,12 @@
                   </div>
                 )}
 
+                {copyEmailMessage && (
+                  <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+                    {copyEmailMessage}
+                  </div>
+                )}
+
                 {currentResults.slice(0, 3).map((result, index) => {
                   const isSelected = selectedResultIndex === index;
                   const reasonValue = reasons[index] || "";
@@ -3637,13 +3909,14 @@
                                 {result.totalCost.toFixed(2)}€
                               </div>
                               <div className="text-sm text-gray-500">Coût total</div>
-                              <a
-                                href={buildMailtoLink(result.transporter.name)}
+                              <button
+                                type="button"
+                                onClick={() => handleCopyEmail(result.transporter.name)}
                                 className="inline-flex items-center gap-2 rounded-md border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
                               >
                                 <MailIcon size={16} />
-                                Contacter par email
-                              </a>
+                                Copier l'email
+                              </button>
                             </div>
                           </div>
                           <div className="space-y-1 text-sm text-gray-700">
@@ -3745,7 +4018,7 @@
                     type="text"
                     value={logSearch}
                     onChange={(e) => setLogSearch(e.target.value)}
-                    placeholder="Rechercher par bordereau"
+                    placeholder="Rechercher par numéro Dynamics"
                     className="w-full border border-gray-300 rounded-lg py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
                     autoComplete="off"
                   />
@@ -3763,7 +4036,7 @@
                 </p>
               ) : !logsLoading && searchHistory.length > 0 && filteredLogs.length === 0 ? (
                 <p className="text-sm text-gray-500">
-                  Aucun bordereau ne correspond à la recherche. Essayez un autre terme.
+                  Aucun numéro de commande Dynamics ne correspond à la recherche. Essayez un autre terme.
                 </p>
               ) : (
                 <>
@@ -3780,7 +4053,7 @@
                       >
                         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between text-sm text-gray-500 mb-2">
                           <div className="flex items-center gap-2 text-gray-700 font-medium">
-                            <span>{log.bordereau || "Bordereau non renseigné"}</span>
+                            <span>{log.bordereau || "Commande Dynamics non renseignée"}</span>
                             <span
                               className={`text-xs px-2 py-1 rounded-full border ${
                                 log.validated
@@ -3801,6 +4074,21 @@
                         <p className="text-sm text-gray-700">
                           <span className="font-semibold">Type :</span> {log.attributesLabel || buildAttributesLabel(log.truckType)}
                         </p>
+                        {(log.loadingDate || log.deliveryDate) && (
+                          <p className="text-sm text-gray-700">
+                            <span className="font-semibold">Dates :</span>
+                            {log.loadingDate ? ` Chargement ${log.loadingDate}` : ""}
+                            {log.deliveryDate ? ` | Livraison ${log.deliveryDate}` : ""}
+                          </p>
+                        )}
+                        {log.deliveryTime && (
+                          <p className="text-sm text-gray-700">
+                            <span className="font-semibold">Horaire :</span> {log.deliveryTime}
+                          </p>
+                        )}
+                        {log.isPremium && (
+                          <p className="text-sm text-indigo-700 font-semibold">Transport premium</p>
+                        )}
                         {log.difference !== null && log.difference !== undefined && (
                           <p className="text-sm text-gray-700">
                             <span className="font-semibold">Écart :</span> {Number(log.difference).toFixed(2)}€
