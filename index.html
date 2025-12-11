@@ -1824,13 +1824,21 @@
         }, []);
 
         const DYNAMICS_ORDER_REGEX = /^FR-(20\d{2})-\d{5}$/;
-        const DELIVERY_TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
+        const DELIVERY_TIME_REGEX = /^([01]\d|2[0-3]):(00|15|30|45)$/;
 
         const computeNextDay = (dateString) => {
           const parsedDate = new Date(dateString);
           if (Number.isNaN(parsedDate)) return "";
 
           parsedDate.setDate(parsedDate.getDate() + 1);
+          return parsedDate.toISOString().slice(0, 10);
+        };
+
+        const computePreviousDay = (dateString) => {
+          const parsedDate = new Date(dateString);
+          if (Number.isNaN(parsedDate)) return "";
+
+          parsedDate.setDate(parsedDate.getDate() - 1);
           return parsedDate.toISOString().slice(0, 10);
         };
 
@@ -1845,6 +1853,12 @@
             setDeliveryDate(computeNextDay(loadingDate));
           }
         }, [loadingDate, deliveryDate]);
+
+        useEffect(() => {
+          if (deliveryDate && !loadingDate) {
+            setLoadingDate(computePreviousDay(deliveryDate));
+          }
+        }, [deliveryDate, loadingDate]);
 
         useEffect(() => {
           setDeliveryTime((previous) => {
@@ -3413,6 +3427,7 @@
                       type="time"
                       value={deliveryTime}
                       onChange={(event) => setDeliveryTime(event.target.value)}
+                      step="900"
                       className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
                     />
                   ) : (
@@ -3428,7 +3443,7 @@
                   {!isDeliveryTimeValid && (
                     <p className="text-xs text-red-600 mt-1">
                       {isPremium
-                        ? "Indiquez une heure valide (format HH:MM)."
+                        ? "Indiquez une heure valide (format HH:MM, par quart d'heure)."
                         : "Choisissez Matin ou Soir."}
                     </p>
                   )}
