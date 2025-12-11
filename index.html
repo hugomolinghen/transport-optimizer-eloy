@@ -1707,12 +1707,6 @@
 
         const buildEmailContent = (transporterName) => {
           const recipient = transporterName || "Transporteur";
-          const subjectParts = ["Demande de transport"];
-          if (bordereau) {
-            subjectParts.push(`Commande Dynamics ${bordereau}`);
-          }
-
-          const subject = subjectParts.join(" - ");
           const deliveryDepartments = (activeRoute.length
             ? activeRoute
             : selectedDepartmentList
@@ -1722,11 +1716,14 @@
             `Bonjour ${recipient},`,
             "",
             bordereau
-              ? `Nous souhaitons organiser le transport pour la commande Dynamics ${bordereau}.`
+              ? `Nous souhaitons organiser le transport pour la commande ${bordereau}.`
               : "Nous souhaitons organiser un transport (référence commande à préciser).",
             `Type de camion : ${buildAttributesLabel(truckType)}.`,
-            `Transport premium : ${isPremium ? "Oui" : "Non"}.`,
           ];
+
+          if (isPremium) {
+            bodyLines.push("Transport premium : Oui.");
+          }
 
           if (loadingDate) {
             bodyLines.push(`Date de chargement : ${loadingDate}.`);
@@ -1751,14 +1748,13 @@
           );
 
           return {
-            subject,
             body: bodyLines.join("\n"),
           };
         };
 
         const handleCopyEmail = async (transporterName) => {
-          const { subject, body } = buildEmailContent(transporterName);
-          const emailText = `Objet : ${subject}\n\n${body}`;
+          const { body } = buildEmailContent(transporterName);
+          const emailText = body;
           const setMessage = (message) => {
             setCopyEmailMessage(message);
             setTimeout(() => setCopyEmailMessage(""), 4000);
