@@ -1657,6 +1657,7 @@
         const [reasons, setReasons] = useState({});
         const [validationError, setValidationError] = useState("");
         const [validationMessage, setValidationMessage] = useState("");
+        const [copyEmailMessage, setCopyEmailMessage] = useState("");
         const [routeMetrics, setRouteMetrics] = useState({
           totalDistanceKm: 0,
           detourKm: 0,
@@ -1704,8 +1705,8 @@
           return "Type non spécifié";
         };
 
-          const buildMailtoLink = (transporterName) => {
-            const recipient = transporterName || "Transporteur";
+        const buildEmailContent = (transporterName) => {
+          const recipient = transporterName || "Transporteur";
           const subjectParts = ["Demande de transport"];
           if (bordereau) {
             subjectParts.push(`Commande Dynamics ${bordereau}`);
@@ -1724,6 +1725,7 @@
               ? `Nous souhaitons organiser le transport pour la commande Dynamics ${bordereau}.`
               : "Nous souhaitons organiser un transport (référence commande à préciser).",
             `Type de camion : ${buildAttributesLabel(truckType)}.`,
+            `Transport premium : ${isPremium ? "Oui" : "Non"}.`,
           ];
 
           if (loadingDate) {
@@ -1748,11 +1750,50 @@
             "Merci d'avance."
           );
 
-          const body = bodyLines.join("\n");
+          return {
+            subject,
+            body: bodyLines.join("\n"),
+          };
+        };
 
-          return `mailto:${encodeURIComponent(
-            recipient
-          )}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        const handleCopyEmail = async (transporterName) => {
+          const { subject, body } = buildEmailContent(transporterName);
+          const emailText = `Objet : ${subject}\n\n${body}`;
+          const setMessage = (message) => {
+            setCopyEmailMessage(message);
+            setTimeout(() => setCopyEmailMessage(""), 4000);
+          };
+
+          try {
+            if (navigator?.clipboard?.writeText) {
+              await navigator.clipboard.writeText(emailText);
+              setMessage("Email copié dans le presse-papiers.");
+              return;
+            }
+            throw new Error("Clipboard API non disponible");
+          } catch (err) {
+            try {
+              const textarea = document.createElement("textarea");
+              textarea.value = emailText;
+              textarea.setAttribute("readonly", "");
+              textarea.style.position = "absolute";
+              textarea.style.left = "-9999px";
+              document.body.appendChild(textarea);
+              textarea.select();
+              textarea.setSelectionRange(0, emailText.length);
+              const success = document.execCommand("copy");
+              document.body.removeChild(textarea);
+
+              if (success) {
+                setMessage("Email copié dans le presse-papiers.");
+              } else {
+                setMessage("Impossible de copier l'email. Merci de copier manuellement.");
+              }
+            } catch (copyErr) {
+              console.error("❌ Erreur lors de la copie de l'email :", copyErr);
+              setMessage("Impossible de copier l'email. Merci de copier manuellement.");
+            }
+          }
         };
 
         const parseDateValue = (value) => {
@@ -3826,6 +3867,12 @@
                   </div>
                 )}
 
+                {copyEmailMessage && (
+                  <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+                    {copyEmailMessage}
+                  </div>
+                )}
+
                 {currentResults.slice(0, 3).map((result, index) => {
                   const isSelected = selectedResultIndex === index;
                   const reasonValue = reasons[index] || "";
@@ -3866,13 +3913,14 @@
                                 {result.totalCost.toFixed(2)}€
                               </div>
                               <div className="text-sm text-gray-500">Coût total</div>
-                              <a
-                                href={buildMailtoLink(result.transporter.name)}
+                              <button
+                                type="button"
+                                onClick={() => handleCopyEmail(result.transporter.name)}
                                 className="inline-flex items-center gap-2 rounded-md border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
                               >
                                 <MailIcon size={16} />
-                                Contacter par email
-                              </a>
+                                Copier l'email
+                              </button>
                             </div>
                           </div>
                           <div className="space-y-1 text-sm text-gray-700">
