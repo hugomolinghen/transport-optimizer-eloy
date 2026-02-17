@@ -1809,6 +1809,7 @@
         const [validationError, setValidationError] = useState("");
         const [validationMessage, setValidationMessage] = useState("");
         const [copyEmailMessage, setCopyEmailMessage] = useState("");
+        const [pendingDeleteSearchId, setPendingDeleteSearchId] = useState(null);
         const [routeMetrics, setRouteMetrics] = useState({
           totalDistanceKm: 0,
           detourKm: 0,
@@ -3001,19 +3002,10 @@
           scrollToResults();
         };
 
-        const handleDeleteUnvalidatedSearch = async (entryId, event) => {
-          event?.stopPropagation?.();
-
+        const handleDeleteUnvalidatedSearch = async (entryId) => {
           const entry = searchHistory.find((item) => item.id === entryId);
           if (!entry || entry.validated) {
-            return;
-          }
-
-          const confirmed = window.confirm(
-            "Voulez-vous supprimer cette recherche non validée ?"
-          );
-
-          if (!confirmed) {
+            setPendingDeleteSearchId(null);
             return;
           }
 
@@ -3041,6 +3033,8 @@
             setValidationError(
               err.message || "Impossible de supprimer cette recherche pour le moment."
             );
+          } finally {
+            setPendingDeleteSearchId(null);
           }
         };
 
@@ -4348,9 +4342,10 @@
                           <div className="mt-3 flex justify-end">
                             <button
                               type="button"
-                              onClick={(event) =>
-                                handleDeleteUnvalidatedSearch(log.id, event)
-                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setPendingDeleteSearchId(log.id);
+                              }}
                               className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
                             >
                               <TrashIcon size={14} /> Supprimer la recherche
@@ -4375,6 +4370,41 @@
               )}
             </div>
           </div>
+
+          {pendingDeleteSearchId && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+              onClick={() => setPendingDeleteSearchId(null)}
+            >
+              <div
+                className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <h3 className="text-lg font-semibold text-gray-800">
+                  Supprimer la recherche non validée
+                </h3>
+                <p className="mt-2 text-sm text-gray-600">
+                  Cette action supprimera définitivement la recherche sélectionnée.
+                </p>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteSearchId(null)}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteUnvalidatedSearch(pendingDeleteSearchId)}
+                    className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+                  >
+                    <TrashIcon size={14} /> Supprimer
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         );
       }
 
