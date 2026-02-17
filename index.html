@@ -991,10 +991,11 @@
             return;
           }
 
-          const escapeCsvCell = (value) => {
-            const text = String(value ?? "").replace(/"/g, '""');
-            return `"${text}"`;
-          };
+          const sanitizeCsvCell = (value) =>
+            String(value ?? "")
+              .replace(/;/g, ",")
+              .replace(/[\r\n]+/g, " ")
+              .trim();
 
           const csvHeader = "transporteur_nom;departement_code;prix_plateau;prix_bache";
           const csvLines = rowsToExport
@@ -1007,7 +1008,7 @@
                 row.flatbedCost ?? "",
                 row.tarpsCost ?? "",
               ]
-                .map(escapeCsvCell)
+                .map(sanitizeCsvCell)
                 .join(";");
             })
             .join("\n");
