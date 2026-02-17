@@ -70,6 +70,7 @@
       const UploadIcon = lucide.Upload || createFallbackIcon("📤");
       const SaveIcon = lucide.Save || createFallbackIcon("💾");
       const RefreshIcon = lucide.RefreshCcw || createFallbackIcon("🔁");
+      const DownloadIcon = lucide.Download || createFallbackIcon("📥");
       const ArrowUpDownIcon = lucide.ArrowUpDown || createFallbackIcon("↕️");
       const UsersIcon = lucide.Users || createFallbackIcon("🧑‍🤝‍🧑");
       const TrashIcon =
@@ -190,6 +191,8 @@
         const [transporterSourceRows, setTransporterSourceRows] = useState([]);
         const [rawDepartments, setRawDepartments] = useState([]);
         const [rawTransporters, setRawTransporters] = useState([]);
+        const [isExportPanelOpen, setIsExportPanelOpen] = useState(false);
+        const [selectedExportTransporters, setSelectedExportTransporters] = useState([]);
         const fileInputRef = useRef(null);
 
         const normalizeNumber = (value) => {
@@ -952,6 +955,87 @@
           fileInputRef.current?.click();
         };
 
+        const toggleExportTransporter = (transporterId) => {
+          setSelectedExportTransporters((previous) => {
+            if (previous.includes(transporterId)) {
+              return previous.filter((id) => id !== transporterId);
+            }
+            return [...previous, transporterId];
+          });
+        };
+
+        const handleOpenExportPanel = () => {
+          setIsExportPanelOpen(true);
+          setCsvError("");
+          setSelectedExportTransporters(
+            groupedTariffs.map((group) => group.transporterId)
+          );
+        };
+
+        const handleExportTariffsCsv = () => {
+          if (!selectedExportTransporters.length) {
+            setCsvError("Sélectionnez au moins un transporteur à exporter.");
+            return;
+          }
+
+          const selectedIds = new Set(selectedExportTransporters);
+          const rowsToExport = tariffRows.filter((row) => {
+            if (!selectedIds.has(row.transporteurId)) return false;
+            const hasTarps = String(row.tarpsCost || "").trim() !== "";
+            const hasFlatbed = String(row.flatbedCost || "").trim() !== "";
+            return hasTarps || hasFlatbed;
+          });
+
+          if (!rowsToExport.length) {
+            setCsvError("Aucune ligne tarifaire à exporter pour la sélection actuelle.");
+            return;
+          }
+
+          const sanitizeCsvCell = (value) =>
+            String(value ?? "")
+              .replace(/;/g, ",")
+              .replace(/[\r\n]+/g, " ")
+              .trim();
+
+          const csvHeader = "transporteur_nom;departement_code;prix_plateau;prix_bache";
+          const csvLines = rowsToExport
+            .map((row) => {
+              const transporterName = row.transporterName || `Transporteur #${row.transporteurId}`;
+              const departmentCode = row.departmentCodeForSave || row.departmentCode || "";
+              return [
+                transporterName,
+                departmentCode,
+                row.flatbedCost ?? "",
+                row.tarpsCost ?? "",
+              ]
+                .map(sanitizeCsvCell)
+                .join(";");
+            })
+            .join("\n");
+
+          const csvContent = `${csvHeader}\n${csvLines}`;
+          const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          const now = new Date();
+          const dateLabel = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(
+            now.getDate()
+          ).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(
+            now.getMinutes()
+          ).padStart(2, "0")}`;
+
+          link.href = url;
+          link.download = `tarifs-transporteurs-${dateLabel}.csv`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+
+          setAdminMessage(`${rowsToExport.length} ligne(s) exportée(s) au format CSV.`);
+          setCsvError("");
+          setIsExportPanelOpen(false);
+        };
+
         const handleCsvFileChange = (event) => {
           const file = event.target.files?.[0];
           if (!file) return;
@@ -1566,6 +1650,12 @@
                             <UploadIcon size={16} /> Import CSV
                           </button>
                           <button
+                            onClick={handleOpenExportPanel}
+                            className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50"
+                          >
+                            <DownloadIcon size={16} /> Export CSV
+                          </button>
+                          <button
                             onClick={handleSaveTariffs}
                             className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                             disabled={isSavingTariffs}
@@ -1579,6 +1669,68 @@
                         transporteur_nom/transporteur_name, departement_id ou
                         departement_code, prix_bache, prix_plateau.
                       </p>
+                      {isExportPanelOpen && (
+                        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-indigo-800">
+                              Sélectionner les transporteurs à exporter
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedExportTransporters(
+                                    groupedTariffs.map((group) => group.transporterId)
+                                  )
+                                }
+                                className="text-xs rounded border border-indigo-300 px-2 py-1 text-indigo-700 hover:bg-indigo-100"
+                              >
+                                Tout sélectionner
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedExportTransporters([])}
+                                className="text-xs rounded border border-indigo-300 px-2 py-1 text-indigo-700 hover:bg-indigo-100"
+                              >
+                                Tout désélectionner
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3 max-h-56 overflow-auto pr-1">
+                            {groupedTariffs.map((group) => (
+                              <label
+                                key={group.transporterId}
+                                className="flex items-center gap-2 text-sm text-gray-700"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedExportTransporters.includes(group.transporterId)}
+                                  onChange={() => toggleExportTransporter(group.transporterId)}
+                                />
+                                <span>{group.transporterName}</span>
+                              </label>
+                            ))}
+                          </div>
+
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setIsExportPanelOpen(false)}
+                              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                            >
+                              Annuler
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleExportTariffsCsv}
+                              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                            >
+                              <DownloadIcon size={14} /> Télécharger le CSV
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       {renderTariffTable()}
                     </>
                   ) : (
@@ -1658,6 +1810,7 @@
         const [validationError, setValidationError] = useState("");
         const [validationMessage, setValidationMessage] = useState("");
         const [copyEmailMessage, setCopyEmailMessage] = useState("");
+        const [pendingDeleteSearchId, setPendingDeleteSearchId] = useState(null);
         const [routeMetrics, setRouteMetrics] = useState({
           totalDistanceKm: 0,
           detourKm: 0,
@@ -2456,6 +2609,10 @@
           };
 
           for (const transporter of transporters) {
+            if (selectedDepts.length === 2 && !transporter.hasBreakOfCharge) {
+              continue;
+            }
+
             let furthestCost = null;
             let furthestDeptDetail = "";
             const details = [];
@@ -2556,7 +2713,7 @@
           }
 
           return rankedResults.sort((a, b) => a.totalCost - b.totalCost);
-        }, [activeRoute, routeMetrics, transporters, truckType]);
+        }, [activeRoute, routeMetrics, selectedDepts.length, transporters, truckType]);
 
         useEffect(() => {
           const topLength = Math.min(3, currentResults.length);
@@ -2848,6 +3005,42 @@
           setCurrentResults(selectedEntry.results || []);
 
           scrollToResults();
+        };
+
+        const handleDeleteUnvalidatedSearch = async (entryId) => {
+          const entry = searchHistory.find((item) => item.id === entryId);
+          if (!entry || entry.validated) {
+            setPendingDeleteSearchId(null);
+            return;
+          }
+
+          try {
+            if (entry.supabaseId) {
+              const { error } = await supabase
+                .from("logs")
+                .delete()
+                .eq("id", entry.supabaseId);
+
+              if (error) throw error;
+            }
+
+            setSearchHistory((previous) =>
+              previous.filter((item) => item.id !== entryId)
+            );
+
+            setActiveSearchId((previousActiveId) =>
+              previousActiveId === entryId ? null : previousActiveId
+            );
+            setValidationMessage("Recherche non validée supprimée.");
+            setValidationError("");
+          } catch (err) {
+            console.error("❌ Erreur suppression recherche non validée :", err);
+            setValidationError(
+              err.message || "Impossible de supprimer cette recherche pour le moment."
+            );
+          } finally {
+            setPendingDeleteSearchId(null);
+          }
         };
 
         const handleResultSelection = (index) => {
@@ -3374,7 +3567,8 @@
           );
 
         return (
-          <div className="max-w-7xl mx-auto p-6">
+          <>
+            <div className="max-w-7xl mx-auto p-6">
             {/* ======= HEADER ======= */}
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8 flex items-center justify-between gap-6">
               <div className="flex items-center gap-3">
@@ -4149,6 +4343,21 @@
                             })}
                           </ul>
                         )}
+
+                        {!log.validated && (
+                          <div className="mt-3 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setPendingDeleteSearchId(log.id);
+                              }}
+                              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                            >
+                              <TrashIcon size={14} /> Supprimer la recherche
+                            </button>
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -4167,6 +4376,42 @@
               )}
             </div>
           </div>
+
+            {pendingDeleteSearchId && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+                onClick={() => setPendingDeleteSearchId(null)}
+              >
+                <div
+                  className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <h3 className="text-lg font-semibold text-gray-800">
+                    Supprimer la recherche non validée
+                  </h3>
+                  <p className="mt-2 text-sm text-gray-600">
+                    Cette action supprimera définitivement la recherche sélectionnée.
+                  </p>
+                  <div className="mt-5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPendingDeleteSearchId(null)}
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteUnvalidatedSearch(pendingDeleteSearchId)}
+                      className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+                    >
+                      <TrashIcon size={14} /> Supprimer
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         );
       }
 
