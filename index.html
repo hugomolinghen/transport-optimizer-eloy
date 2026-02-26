@@ -979,12 +979,9 @@
           }
 
           const selectedIds = new Set(selectedExportTransporters);
-          const rowsToExport = tariffRows.filter((row) => {
-            if (!selectedIds.has(row.transporteurId)) return false;
-            const hasTarps = String(row.tarpsCost || "").trim() !== "";
-            const hasFlatbed = String(row.flatbedCost || "").trim() !== "";
-            return hasTarps || hasFlatbed;
-          });
+          const rowsToExport = tariffRows.filter((row) =>
+            selectedIds.has(row.transporteurId)
+          );
 
           if (!rowsToExport.length) {
             setCsvError("Aucune ligne tarifaire à exporter pour la sélection actuelle.");
