@@ -18,6 +18,9 @@
     <!-- ✅ Supabase JS -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
+    <!-- ✅ SheetJS (export Excel .xlsx) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
     <!-- ✅ Babel (pour exécuter le JSX directement dans le navigateur) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   </head>
@@ -196,6 +199,8 @@
         const [selectedExportTransporters, setSelectedExportTransporters] = useState([]);
         const [selectedLogResult, setSelectedLogResult] = useState("all");
         const [selectedLogUser, setSelectedLogUser] = useState("all");
+        const [dataScrollPercent, setDataScrollPercent] = useState(0);
+        const dataTableWrapperRef = useRef(null);
         const fileInputRef = useRef(null);
 
         const normalizeNumber = (value) => {
@@ -635,6 +640,39 @@
           ).sort((a, b) => a.localeCompare(b, "fr", { numeric: true }));
         }, [normalizedLogs]);
 
+        const logColumns = useMemo(() => {
+          const excludedKeys = new Set(["searchDate", "normalizedResult", "normalizedUser"]);
+          const preferredOrder = [
+            "id",
+            "date_recherche",
+            "created_at",
+            "utilisateur",
+            "bordereau",
+            "resultat",
+            "transport_premium",
+            "attributs",
+            "departements",
+            "difference",
+          ];
+
+          const discovered = new Set();
+          normalizedLogs.forEach((log) => {
+            Object.keys(log || {}).forEach((key) => {
+              if (!excludedKeys.has(key)) {
+                discovered.add(key);
+              }
+            });
+          });
+
+          const discoveredArray = Array.from(discovered);
+          const preferred = preferredOrder.filter((key) => discovered.has(key));
+          const others = discoveredArray
+            .filter((key) => !preferred.includes(key))
+            .sort((a, b) => a.localeCompare(b, "fr", { numeric: true }));
+
+          return [...preferred, ...others];
+        }, [normalizedLogs]);
+
         const filteredDataLogs = useMemo(() => {
           return normalizedLogs.filter((log) => {
             const matchResult =
@@ -644,6 +682,59 @@
             return matchResult && matchUser;
           });
         }, [normalizedLogs, selectedLogResult, selectedLogUser]);
+
+        const formatLogCell = (value) => {
+          if (value === null || value === undefined || value === "") {
+            return "—";
+          }
+
+          if (typeof value === "boolean") {
+            return value ? "Oui" : "Non";
+          }
+
+          if (typeof value === "object") {
+            try {
+              return JSON.stringify(value);
+            } catch (error) {
+              return String(value);
+            }
+          }
+
+          return String(value);
+        };
+
+        const updateDataScrollPercent = useCallback(() => {
+          const element = dataTableWrapperRef.current;
+          if (!element) {
+            setDataScrollPercent(0);
+            return;
+          }
+
+          const maxScroll = Math.max(0, element.scrollWidth - element.clientWidth);
+          if (maxScroll <= 0) {
+            setDataScrollPercent(0);
+            return;
+          }
+
+          const ratio = (element.scrollLeft / maxScroll) * 100;
+          setDataScrollPercent(Math.max(0, Math.min(100, ratio)));
+        }, []);
+
+        useEffect(() => {
+          updateDataScrollPercent();
+          window.addEventListener("resize", updateDataScrollPercent);
+          return () => window.removeEventListener("resize", updateDataScrollPercent);
+        }, [filteredDataLogs, logColumns, updateDataScrollPercent]);
+
+        const handleDataSliderChange = (event) => {
+          const element = dataTableWrapperRef.current;
+          if (!element) return;
+
+          const percent = Number(event.target.value) || 0;
+          const maxScroll = Math.max(0, element.scrollWidth - element.clientWidth);
+          element.scrollLeft = (percent / 100) * maxScroll;
+          setDataScrollPercent(percent);
+        };
 
         useEffect(() => {
           if (selectedLogResult !== "all" && !logResultOptions.includes(selectedLogResult)) {
@@ -663,61 +754,38 @@
             return;
           }
 
-          const escapeHtml = (value) =>
-            String(value ?? "")
-              .replace(/&/g, "&amp;")
-              .replace(/</g, "&lt;")
-              .replace(/>/g, "&gt;")
-              .replace(/"/g, "&quot;")
-              .replace(/'/g, "&#39;");
+          if (!window.XLSX) {
+            setAdminError("Le module d'export Excel n'est pas disponible.");
+            return;
+          }
 
-          const rowsHtml = filteredDataLogs
-            .map((log) => {
-              const dateValue = log.searchDate
-                ? new Date(log.searchDate).toLocaleString("fr-FR")
-                : "";
-
-              return `
-                <tr>
-                  <td>${escapeHtml(log.id)}</td>
-                  <td>${escapeHtml(dateValue)}</td>
-                  <td>${escapeHtml(log.utilisateur)}</td>
-                  <td>${escapeHtml(log.bordereau)}</td>
-                  <td>${escapeHtml(log.resultat)}</td>
-                  <td>${escapeHtml(log.transport_premium ? "Oui" : "Non")}</td>
-                  <td>${escapeHtml(log.attributs)}</td>
-                  <td>${escapeHtml(log.departements)}</td>
-                  <td>${escapeHtml(log.difference)}</td>
-                </tr>
-              `;
-            })
-            .join("");
-
-          const tableHtml = `
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Date recherche</th>
-                  <th>Utilisateur</th>
-                  <th>Bordereau</th>
-                  <th>Résultat</th>
-                  <th>Premium</th>
-                  <th>Attributs</th>
-                  <th>Départements</th>
-                  <th>Différence</th>
-                </tr>
-              </thead>
-              <tbody>${rowsHtml}</tbody>
-            </table>
-          `;
-
-          const htmlDoc = `﻿<html><head><meta charset="UTF-8"></head><body>${tableHtml}</body></html>`;
-          const blob = new Blob([htmlDoc], {
-            type: "application/vnd.ms-excel;charset=utf-8;",
+          const rowsToExport = filteredDataLogs.map((log) => {
+            const row = {};
+            logColumns.forEach((column) => {
+              const value = log[column];
+              if (value === null || value === undefined) {
+                row[column] = "";
+              } else if (typeof value === "object") {
+                try {
+                  row[column] = JSON.stringify(value);
+                } catch (error) {
+                  row[column] = String(value);
+                }
+              } else if (typeof value === "boolean") {
+                row[column] = value ? "Oui" : "Non";
+              } else {
+                row[column] = value;
+              }
+            });
+            return row;
           });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement("a");
+
+          const worksheet = window.XLSX.utils.json_to_sheet(rowsToExport, {
+            header: logColumns,
+          });
+          const workbook = window.XLSX.utils.book_new();
+          window.XLSX.utils.book_append_sheet(workbook, worksheet, "logs");
+
           const now = new Date();
           const dateLabel = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(
             now.getDate()
@@ -725,14 +793,9 @@
             now.getMinutes()
           ).padStart(2, "0")}`;
 
-          link.href = url;
-          link.download = `logs-supabase-${dateLabel}.xls`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
+          window.XLSX.writeFile(workbook, `logs-supabase-${dateLabel}.xlsx`);
 
-          setAdminMessage(`${filteredDataLogs.length} log(s) exporté(s) au format Excel.`);
+          setAdminMessage(`${filteredDataLogs.length} log(s) exporté(s) au format Excel (.xlsx).`);
           setAdminError("");
         };
 
@@ -1782,6 +1845,16 @@
                   >
                     Data
                   </button>
+                  <button
+                    onClick={() => setActiveTab("rapport")}
+                    className={`flex-1 px-4 py-3 text-sm font-medium ${
+                      activeTab === "rapport"
+                        ? "text-indigo-600 border-b-2 border-indigo-600"
+                        : "text-gray-500 hover:text-indigo-600"
+                    }`}
+                  >
+                    Rapport
+                  </button>
                 </div>
 
                 <div className="p-6 space-y-4">
@@ -1913,7 +1986,7 @@
                       </div>
                       {renderTransporterTable()}
                     </>
-                  ) : (
+                  ) : activeTab === "data" ? (
                     <>
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <span className="text-sm text-gray-500">
@@ -1924,7 +1997,7 @@
                           onClick={handleExportLogsExcel}
                           className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
                         >
-                          <DownloadIcon size={16} /> Télécharger Excel
+                          <DownloadIcon size={16} /> Télécharger Excel (.xlsx)
                         </button>
                       </div>
 
@@ -1961,48 +2034,62 @@
                         </label>
                       </div>
 
-                      <div className="overflow-x-auto rounded-xl border border-gray-200">
-                        <table className="min-w-full divide-y divide-gray-200 text-sm">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-600">Date</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-600">Utilisateur</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-600">Bordereau</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-600">Résultat</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-600">Premium</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-600">Attributs</th>
-                              <th className="px-3 py-2 text-left font-semibold text-gray-600">Départements</th>
-                              <th className="px-3 py-2 text-right font-semibold text-gray-600">Différence</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100 bg-white">
-                            {filteredDataLogs.map((log) => (
-                              <tr key={log.id || `${log.searchDate}-${log.bordereau || ""}`}>
-                                <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
-                                  {log.searchDate
-                                    ? new Date(log.searchDate).toLocaleString("fr-FR")
-                                    : "—"}
-                                </td>
-                                <td className="px-3 py-2 text-gray-700">{log.utilisateur || "—"}</td>
-                                <td className="px-3 py-2 text-gray-700">{log.bordereau || "—"}</td>
-                                <td className="px-3 py-2 text-gray-700">{log.resultat || "—"}</td>
-                                <td className="px-3 py-2 text-gray-700">{log.transport_premium ? "Oui" : "Non"}</td>
-                                <td className="px-3 py-2 text-gray-700">{log.attributs || "—"}</td>
-                                <td className="px-3 py-2 text-gray-700">{log.departements || "—"}</td>
-                                <td className="px-3 py-2 text-right text-gray-700">
-                                  {log.difference !== null && log.difference !== undefined && log.difference !== ""
-                                    ? Number(log.difference).toFixed(2)
-                                    : "—"}
-                                </td>
+                      <div className="rounded-xl border border-gray-200 p-3">
+                        <div className="mb-2 flex items-center gap-3">
+                          <span className="text-xs text-gray-500">Défilement horizontal</span>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={dataScrollPercent}
+                            onChange={handleDataSliderChange}
+                            className="w-full"
+                          />
+                        </div>
+                        <div
+                          ref={dataTableWrapperRef}
+                          onScroll={updateDataScrollPercent}
+                          className="overflow-x-auto"
+                        >
+                          <table className="min-w-max divide-y divide-gray-200 text-sm">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                {logColumns.map((column) => (
+                                  <th
+                                    key={column}
+                                    className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap"
+                                  >
+                                    {column}
+                                  </th>
+                                ))}
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 bg-white">
+                              {filteredDataLogs.map((log) => (
+                                <tr key={log.id || `${log.searchDate}-${log.bordereau || ""}`}>
+                                  {logColumns.map((column) => (
+                                    <td
+                                      key={`${log.id || log.searchDate || "row"}-${column}`}
+                                      className="px-3 py-2 text-gray-700 whitespace-nowrap"
+                                    >
+                                      {formatLogCell(log[column])}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
+
                       {!filteredDataLogs.length && (
                         <p className="text-sm text-gray-500">Aucun log trouvé avec ces filtres.</p>
                       )}
                     </>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-6 py-12 text-center text-gray-500">
+                      Onglet Rapport prêt pour les futurs graphiques.
+                    </div>
                   )}
                 </div>
               </div>
