@@ -199,8 +199,6 @@
         const [selectedExportTransporters, setSelectedExportTransporters] = useState([]);
         const [selectedLogResult, setSelectedLogResult] = useState("all");
         const [selectedLogUser, setSelectedLogUser] = useState("all");
-        const [dataScrollPercent, setDataScrollPercent] = useState(0);
-        const dataTableWrapperRef = useRef(null);
         const fileInputRef = useRef(null);
 
         const normalizeNumber = (value) => {
@@ -641,9 +639,8 @@
         }, [normalizedLogs]);
 
         const logColumns = useMemo(() => {
-          const excludedKeys = new Set(["searchDate", "normalizedResult", "normalizedUser"]);
+          const excludedKeys = new Set(["searchDate", "normalizedResult", "normalizedUser", "id"]);
           const preferredOrder = [
-            "id",
             "date_recherche",
             "created_at",
             "utilisateur",
@@ -701,39 +698,6 @@
           }
 
           return String(value);
-        };
-
-        const updateDataScrollPercent = useCallback(() => {
-          const element = dataTableWrapperRef.current;
-          if (!element) {
-            setDataScrollPercent(0);
-            return;
-          }
-
-          const maxScroll = Math.max(0, element.scrollWidth - element.clientWidth);
-          if (maxScroll <= 0) {
-            setDataScrollPercent(0);
-            return;
-          }
-
-          const ratio = (element.scrollLeft / maxScroll) * 100;
-          setDataScrollPercent(Math.max(0, Math.min(100, ratio)));
-        }, []);
-
-        useEffect(() => {
-          updateDataScrollPercent();
-          window.addEventListener("resize", updateDataScrollPercent);
-          return () => window.removeEventListener("resize", updateDataScrollPercent);
-        }, [filteredDataLogs, logColumns, updateDataScrollPercent]);
-
-        const handleDataSliderChange = (event) => {
-          const element = dataTableWrapperRef.current;
-          if (!element) return;
-
-          const percent = Number(event.target.value) || 0;
-          const maxScroll = Math.max(0, element.scrollWidth - element.clientWidth);
-          element.scrollLeft = (percent / 100) * maxScroll;
-          setDataScrollPercent(percent);
         };
 
         useEffect(() => {
@@ -2035,20 +1999,7 @@
                       </div>
 
                       <div className="rounded-xl border border-gray-200 p-3">
-                        <div className="mb-2 flex items-center gap-3">
-                          <span className="text-xs text-gray-500">Défilement horizontal</span>
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={dataScrollPercent}
-                            onChange={handleDataSliderChange}
-                            className="w-full"
-                          />
-                        </div>
                         <div
-                          ref={dataTableWrapperRef}
-                          onScroll={updateDataScrollPercent}
                           className="overflow-x-auto"
                         >
                           <table className="min-w-max divide-y divide-gray-200 text-sm">
