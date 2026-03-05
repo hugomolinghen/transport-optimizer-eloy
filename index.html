@@ -2908,6 +2908,12 @@
           };
 
           for (const transporter of transporters) {
+            const transporterId = Number(transporter.id);
+
+            if (isPremium && transporterId !== 4) {
+              continue;
+            }
+
             if (selectedDepts.length === 2 && !transporter.hasBreakOfCharge) {
               continue;
             }
@@ -2961,6 +2967,14 @@
 
             let totalCost = furthestCost;
 
+            if (isPremium) {
+              const premiumMarkupCost = furthestCost * 0.04;
+              totalCost += premiumMarkupCost;
+              details.push(
+                `+ Majoration transport premium (4% de ${furthestCost.toFixed(2)}€) : ${premiumMarkupCost.toFixed(2)}€`
+              );
+            }
+
             if (transporter.hasBreakOfCharge) {
               const breakCost = Number(transporter.breakOfChargeCost);
               const breaksCount = Math.max(0, activeRoute.length - 1);
@@ -3012,7 +3026,14 @@
           }
 
           return rankedResults.sort((a, b) => a.totalCost - b.totalCost);
-        }, [activeRoute, routeMetrics, selectedDepts.length, transporters, truckType]);
+        }, [
+          activeRoute,
+          isPremium,
+          routeMetrics,
+          selectedDepts.length,
+          transporters,
+          truckType,
+        ]);
 
         useEffect(() => {
           const topLength = Math.min(3, currentResults.length);
