@@ -680,9 +680,22 @@
           });
         }, [normalizedLogs, selectedLogResult, selectedLogUser]);
 
-        const formatLogCell = (value) => {
+        const formatDateValue = (value) => {
+          if (!value) return "";
+          const parsedDate = new Date(value);
+          if (Number.isNaN(parsedDate.getTime())) {
+            return String(value);
+          }
+          return parsedDate.toLocaleString("fr-FR");
+        };
+
+        const formatLogCell = (column, value) => {
           if (value === null || value === undefined || value === "") {
             return "—";
+          }
+
+          if (column === "date_recherche" || column === "created_at") {
+            return formatDateValue(value);
           }
 
           if (typeof value === "boolean") {
@@ -729,6 +742,8 @@
               const value = log[column];
               if (value === null || value === undefined) {
                 row[column] = "";
+              } else if (column === "date_recherche" || column === "created_at") {
+                row[column] = formatDateValue(value);
               } else if (typeof value === "object") {
                 try {
                   row[column] = JSON.stringify(value);
@@ -2023,7 +2038,7 @@
                                       key={`${log.id || log.searchDate || "row"}-${column}`}
                                       className="px-3 py-2 text-gray-700 whitespace-nowrap"
                                     >
-                                      {formatLogCell(log[column])}
+                                      {formatLogCell(column, log[column])}
                                     </td>
                                   ))}
                                 </tr>
