@@ -178,6 +178,21 @@
         return list;
       }
 
+      const buildRouteStopDescriptors = (route) => {
+        const occurrences = new Map();
+
+        return (route || []).map((dept, index) => {
+          const currentOccurrence = (occurrences.get(dept.id) || 0) + 1;
+          occurrences.set(dept.id, currentOccurrence);
+
+          return {
+            key: `${dept.id}-${currentOccurrence}`,
+            index,
+            dept,
+          };
+        });
+      };
+
       /********************************************
        *  INTERFACE ADMINISTRATEUR
        ********************************************/
@@ -2091,6 +2106,7 @@
         const [loadingDate, setLoadingDate] = useState("");
         const [deliveryDate, setDeliveryDate] = useState("");
         const [deliveryTime, setDeliveryTime] = useState("");
+        const [deliveryScheduleByStop, setDeliveryScheduleByStop] = useState({});
         const [hasSearched, setHasSearched] = useState(false);
         const [session, setSession] = useState(null);
         const [authLoading, setAuthLoading] = useState(true);
@@ -2189,11 +2205,12 @@
             bodyLines.push(`Date de livraison : ${deliveryDate}.`);
           }
 
-          if (deliveryTime) {
-            bodyLines.push(`Horaire de livraison : ${deliveryTime}.`);
+          const deliveryScheduleLines = formatDeliveryScheduleForEmail();
+          if (deliveryScheduleLines.length) {
+            bodyLines.push(...deliveryScheduleLines);
           }
 
-          if (deliveryDepartments.length) {
+          if (!isPremium && deliveryDepartments.length) {
             bodyLines.push("Départements à livrer :", ...deliveryDepartments);
           }
 
@@ -2278,6 +2295,25 @@
             .filter(Boolean)
             .map((dept) => `${dept.code} - ${dept.name}`)
             .join(", ");
+
+        const formatDeliveryScheduleForEmail = () => {
+          if (!isPremium) {
+            return deliveryTime ? [`Horaire de livraison : ${deliveryTime}.`] : [];
+          }
+
+          if (!routeStops.length) {
+            return [];
+          }
+
+          const lines = ["Horaires de livraison par arrêt :"];
+          routeStops.forEach((stop, index) => {
+            const slot = deliveryScheduleByStop[stop.key] || "À définir";
+            lines.push(
+              `${index + 1}. ${stop.dept.code} - ${stop.dept.name} : ${slot}`
+            );
+          });
+          return lines;
+        };
 
         useEffect(() => {
           if (typeof localStorage === "undefined") return;
@@ -2378,6 +2414,10 @@
         }, [deliveryTime]);
 
         useEffect(() => {
+          if (!isPremium) {
+            setDeliveryScheduleByStop({});
+          }
+
           setDeliveryTime((previous) => {
             if (isPremium) {
               return DELIVERY_TIME_REGEX.test(previous) ? previous : "";
@@ -2693,6 +2733,11 @@
           return optimalRoute;
         }, [isRouteReversed, optimalRoute]);
 
+        const routeStops = useMemo(
+          () => buildRouteStopDescriptors(activeRoute),
+          [activeRoute]
+        );
+
         const selectedDepartmentList = useMemo(() => {
           return selectedDepts
             .map((id) => departments.find((dept) => dept.id === id))
@@ -2718,6 +2763,26 @@
             return codeMatch || nameMatch;
           });
         }, [departmentSearch, departments]);
+
+        useEffect(() => {
+          if (!isPremium) return;
+
+          const validKeys = new Set(routeStops.map((stop) => stop.key));
+          setDeliveryScheduleByStop((previous) => {
+            const next = {};
+            routeStops.forEach((stop) => {
+              if (validKeys.has(stop.key) && DELIVERY_TIME_REGEX.test(previous[stop.key] || "")) {
+                next[stop.key] = previous[stop.key];
+              }
+            });
+
+            const unchanged =
+              Object.keys(next).length === Object.keys(previous).length &&
+              Object.keys(next).every((key) => next[key] === previous[key]);
+
+            return unchanged ? previous : next;
+          });
+        }, [isPremium, routeStops]);
 
         const routeDistanceCacheRef = useRef(new Map());
 
@@ -3184,6 +3249,18 @@
             ? "plateau"
             : "non-specifie";
 
+          const parsedSchedule = (() => {
+            if (!log.horaire_livraison || typeof log.horaire_livraison !== "string") {
+              return {};
+            }
+            try {
+              const parsed = JSON.parse(log.horaire_livraison);
+              return parsed && typeof parsed === "object" ? parsed : {};
+            } catch (_err) {
+              return {};
+            }
+          })();
+
           return {
             id: log.id ? `log-${log.id}` : generateLocalId(),
             supabaseId: log.id || null,
@@ -3191,7 +3268,8 @@
             isPremium: Boolean(log.transport_premium),
             loadingDate: log.date_chargement || "",
             deliveryDate: log.date_livraison || "",
-            deliveryTime: log.horaire_livraison || "",
+            deliveryTime: log.transport_premium ? "" : log.horaire_livraison || "",
+            deliveryScheduleByStop: parsedSchedule,
             selectedDepts: [],
             truckType: truckTypeFromLog,
             formattedDepartments: log.departements || "",
@@ -3280,8 +3358,14 @@
           Boolean(deliveryDate) &&
           (!loadingDate || new Date(deliveryDate) >= new Date(loadingDate));
         const isDeliveryTimeValid = isPremium
-          ? DELIVERY_TIME_REGEX.test(deliveryTime)
+          ? true
           : deliveryTime === "matin" || deliveryTime === "soir";
+        const arePremiumStopTimesValid = !isPremium
+          ? true
+          : routeStops.length > 0 &&
+            routeStops.every((stop) =>
+              DELIVERY_TIME_REGEX.test(deliveryScheduleByStop[stop.key] || "")
+            );
 
         const handleSearch = () => {
           setHasSearched(true);
@@ -3300,7 +3384,12 @@
             isPremium,
             loadingDate,
             deliveryDate,
-            deliveryTime,
+            deliveryTime: isPremium
+              ? routeStops[0]
+                ? deliveryScheduleByStop[routeStops[0].key] || ""
+                : ""
+              : deliveryTime,
+            deliveryScheduleByStop: isPremium ? { ...deliveryScheduleByStop } : {},
             createdAt: new Date().toISOString(),
             validated: false,
             results: resultsSnapshot,
@@ -3333,6 +3422,7 @@
           setLoadingDate(selectedEntry.loadingDate || "");
           setDeliveryDate(selectedEntry.deliveryDate || "");
           setDeliveryTime(selectedEntry.deliveryTime || "");
+          setDeliveryScheduleByStop(selectedEntry.deliveryScheduleByStop || {});
           setSelectedResultIndex(
             selectedEntry.selectedResultIndex !== undefined
               ? selectedEntry.selectedResultIndex
@@ -3522,6 +3612,12 @@
               attributs:
                 activeSearch.attributesLabel ||
                 buildAttributesLabel(activeSearch.truckType),
+              transport_premium: Boolean(activeSearch.isPremium),
+              date_chargement: activeSearch.loadingDate || null,
+              date_livraison: activeSearch.deliveryDate || null,
+              horaire_livraison: activeSearch.isPremium
+                ? JSON.stringify(activeSearch.deliveryScheduleByStop || {})
+                : activeSearch.deliveryTime || null,
               resultat: selectedChoice.transporter.name,
               choix_1: rankedChoices[0]
                 ? rankedChoices[0].transporter.name
@@ -4020,56 +4116,11 @@
                   </p>
                 )}
 
-                {/* Horaire de livraison */}
-                <div className="mb-4">
-                  <label className="block mb-1 text-sm font-medium text-gray-700">
-                    Horaire de livraison <span className="text-red-600">*</span>
-                  </label>
-                  {isPremium ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={premiumHour}
-                        onChange={(event) => {
-                          const newHour = event.target.value;
-                          setPremiumHour(newHour);
-                          setDeliveryTime(
-                            newHour
-                              ? `${newHour}:${premiumMinute || "00"}`
-                              : ""
-                          );
-                        }}
-                        className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
-                      >
-                        <option value="" disabled>
-                          Heure (00-23)
-                        </option>
-                        {premiumHours.map((hourOption) => (
-                          <option key={hourOption} value={hourOption}>
-                            {hourOption} h
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        value={premiumMinute}
-                        onChange={(event) => {
-                          const newMinute = event.target.value;
-                          setPremiumMinute(newMinute);
-                          setDeliveryTime(
-                            premiumHour
-                              ? `${premiumHour}:${newMinute}`
-                              : ""
-                          );
-                        }}
-                        className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
-                      >
-                        {premiumMinutes.map((minuteOption) => (
-                          <option key={minuteOption} value={minuteOption}>
-                            {minuteOption} min
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : (
+                {!isPremium && (
+                  <div className="mb-4">
+                    <label className="block mb-1 text-sm font-medium text-gray-700">
+                      Horaire de livraison <span className="text-red-600">*</span>
+                    </label>
                     <select
                       value={deliveryTime || "matin"}
                       onChange={(event) => setDeliveryTime(event.target.value)}
@@ -4078,15 +4129,11 @@
                       <option value="matin">Matin</option>
                       <option value="soir">Soir</option>
                     </select>
-                  )}
-                  {!isDeliveryTimeValid && (
-                    <p className="text-xs text-red-600 mt-1">
-                      {isPremium
-                        ? "Indiquez une heure valide (format HH:MM, par quart d'heure)."
-                        : "Choisissez Matin ou Soir."}
-                    </p>
-                  )}
-                </div>
+                    {!isDeliveryTimeValid && (
+                      <p className="text-xs text-red-600 mt-1">Choisissez Matin ou Soir.</p>
+                    )}
+                  </div>
+                )}
 
                 {/* Type de camion */}
                 <label className="block mb-2 text-sm font-medium text-gray-700">
@@ -4136,6 +4183,7 @@
                       !isLoadingDateValid ||
                       !isDeliveryDateValid ||
                       !isDeliveryTimeValid ||
+                      !arePremiumStopTimesValid ||
                       !truckType ||
                       !selectedDepts.length ||
                       isSearching ||
@@ -4158,6 +4206,7 @@
                   <button
                     onClick={() => {
                       setSelectedDepts([]);
+                      setDeliveryScheduleByStop({});
                     }}
                     className="text-sm text-indigo-600 hover:text-indigo-800"
                   >
@@ -4291,6 +4340,72 @@
                     </li>
                   ))}
                 </ol>
+              )}
+
+              {isPremium && routeStops.length > 0 && (
+                <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 p-4">
+                  <h3 className="mb-2 text-sm font-semibold text-indigo-800">
+                    Horaires de livraison par arrêt <span className="text-red-600">*</span>
+                  </h3>
+                  <div className="space-y-2">
+                    {routeStops.map((stop, index) => {
+                      const currentValue = deliveryScheduleByStop[stop.key] || "";
+                      const [stopHour = "", stopMinute = "00"] = currentValue
+                        ? currentValue.split(":")
+                        : ["", "00"];
+
+                      return (
+                        <div key={stop.key} className="grid grid-cols-1 gap-2 md:grid-cols-3 md:items-center">
+                          <div className="text-sm text-gray-700">
+                            {index + 1}. {stop.dept.code} - {stop.dept.name}
+                          </div>
+                          <select
+                            value={stopHour}
+                            onChange={(event) => {
+                              const newHour = event.target.value;
+                              setDeliveryScheduleByStop((prev) => ({
+                                ...prev,
+                                [stop.key]: newHour ? `${newHour}:${stopMinute || "00"}` : "",
+                              }));
+                            }}
+                            className="w-full rounded border px-3 py-2 focus:ring-2 focus:ring-indigo-500"
+                          >
+                            <option value="" disabled>
+                              Heure (00-23)
+                            </option>
+                            {premiumHours.map((hourOption) => (
+                              <option key={`${stop.key}-${hourOption}`} value={hourOption}>
+                                {hourOption} h
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={stopMinute}
+                            onChange={(event) => {
+                              const newMinute = event.target.value;
+                              setDeliveryScheduleByStop((prev) => ({
+                                ...prev,
+                                [stop.key]: stopHour ? `${stopHour}:${newMinute}` : "",
+                              }));
+                            }}
+                            className="w-full rounded border px-3 py-2 focus:ring-2 focus:ring-indigo-500"
+                          >
+                            {premiumMinutes.map((minuteOption) => (
+                              <option key={`${stop.key}-m-${minuteOption}`} value={minuteOption}>
+                                {minuteOption} min
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {!arePremiumStopTimesValid && (
+                    <p className="mt-2 text-xs text-red-600">
+                      Renseignez un horaire valide pour chaque arrêt premium (format HH:MM par quart d'heure).
+                    </p>
+                  )}
+                </div>
               )}
 
               {routeMetrics.loading && (
