@@ -90,6 +90,9 @@
         "Préférence pour un autre transporteur (organisation interne)",
       ];
 
+      const PREMIUM_TRANSPORTER_ID = 4;
+      const PREMIUM_RATE_MULTIPLIER = 1.04;
+
       const sanitizeUsername = (username) => {
         if (!username) return "";
 
@@ -2916,6 +2919,10 @@
           };
 
           for (const transporter of transporters) {
+            if (isPremium && Number(transporter.id) !== PREMIUM_TRANSPORTER_ID) {
+              continue;
+            }
+
             if (selectedDepts.length === 2 && !transporter.hasBreakOfCharge) {
               continue;
             }
@@ -2969,6 +2976,13 @@
 
             let totalCost = furthestCost;
 
+            if (isPremium) {
+              totalCost = furthestCost * PREMIUM_RATE_MULTIPLIER;
+              details.push(
+                `→ Majoration premium (${((PREMIUM_RATE_MULTIPLIER - 1) * 100).toFixed(0)}%) : ${furthestCost.toFixed(2)}€ → ${totalCost.toFixed(2)}€`
+              );
+            }
+
             if (transporter.hasBreakOfCharge) {
               const breakCost = Number(transporter.breakOfChargeCost);
               const breaksCount = Math.max(0, activeRoute.length - 1);
@@ -3020,7 +3034,7 @@
           }
 
           return rankedResults.sort((a, b) => a.totalCost - b.totalCost);
-        }, [activeRoute, routeMetrics, selectedDepts.length, transporters, truckType]);
+        }, [activeRoute, isPremium, routeMetrics, selectedDepts.length, transporters, truckType]);
 
         useEffect(() => {
           const topLength = Math.min(3, currentResults.length);
