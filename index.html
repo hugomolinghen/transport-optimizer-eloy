@@ -2210,7 +2210,7 @@
             bodyLines.push(...deliveryScheduleLines);
           }
 
-          if (deliveryDepartments.length) {
+          if (!isPremium && deliveryDepartments.length) {
             bodyLines.push("Départements à livrer :", ...deliveryDepartments);
           }
 
