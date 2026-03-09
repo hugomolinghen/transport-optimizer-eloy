@@ -82,6 +82,7 @@
 
       const ADMIN_EMAILS = ["admin@users.eloy"];
       const NON_SELECTION_REASONS = [
+        "Disponibilité du transporteur",
         "Difficulté à joindre le transporteur",
         "Délais de livraison proposés trop longs",
         "Transporteur inadapté à la zone",
@@ -2695,6 +2696,22 @@
             .filter(Boolean);
         }, [selectedDepts, departments]);
 
+        const hasDuplicatedDepartments = useMemo(() => {
+          const seen = new Set();
+          for (const deptId of selectedDepts) {
+            if (seen.has(deptId)) {
+              return true;
+            }
+            seen.add(deptId);
+          }
+          return false;
+        }, [selectedDepts]);
+
+        const getDepartmentSelectionCount = useCallback(
+          (deptId) => selectedDepts.filter((id) => id === deptId).length,
+          [selectedDepts]
+        );
+
         const filteredDepartments = useMemo(() => {
           const query = departmentSearch.trim().toLowerCase();
 
@@ -2716,6 +2733,17 @@
 
           const computeRouteMetrics = async () => {
             if (!activeRoute.length) {
+              if (!isActive) return;
+              setRouteMetrics({
+                totalDistanceKm: 0,
+                detourKm: 0,
+                loading: false,
+                error: "",
+              });
+              return;
+            }
+
+            if (hasDuplicatedDepartments) {
               if (!isActive) return;
               setRouteMetrics({
                 totalDistanceKm: 0,
@@ -2863,7 +2891,7 @@
           return () => {
             isActive = false;
           };
-        }, [activeRoute, isRouteReversed]);
+        }, [activeRoute, hasDuplicatedDepartments, isRouteReversed]);
 
         const bestTransporters = useMemo(() => {
           if (!selectedDepts.length || !truckType || !transporters.length) return [];
@@ -3407,10 +3435,21 @@
 
         const toggleDepartmentSelection = useCallback((deptId) => {
           setSelectedDepts((prev) => {
-            if (prev.includes(deptId)) {
-              return prev.filter((id) => id !== deptId);
+            const index = prev.findIndex((id) => id === deptId);
+            if (index !== -1) {
+              return [...prev.slice(0, index), ...prev.slice(index + 1)];
             }
 
+            return [...prev, deptId];
+          });
+        }, []);
+
+        const addDepartmentDuplicate = useCallback((deptId) => {
+          setSelectedDepts((prev) => {
+            const duplicateCount = prev.filter((id) => id === deptId).length;
+            if (duplicateCount >= 2) {
+              return prev;
+            }
             return [...prev, deptId];
           });
         }, []);
@@ -4140,6 +4179,7 @@
                   ) : (
                     filteredDepartments.map((dept) => {
                       const isSelected = selectedDepts.includes(dept.id);
+                      const selectedCount = getDepartmentSelectionCount(dept.id);
 
                       return (
                         <div
@@ -4167,8 +4207,26 @@
                               {dept.code}
                             </span>
                             <span>{dept.name}</span>
+                            {selectedCount > 1 && (
+                              <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                                x{selectedCount}
+                              </span>
+                            )}
                           </div>
-                          <span className="text-sm text-gray-500">{dept.km} km</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-500">{dept.km} km</span>
+                            <button
+                              type="button"
+                              className="rounded bg-indigo-100 px-2 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-200 disabled:opacity-50"
+                              disabled={!isSelected || selectedCount >= 2}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                addDepartmentDuplicate(dept.id);
+                              }}
+                            >
+                              +1
+                            </button>
+                          </div>
                         </div>
                       );
                     })
@@ -4210,7 +4268,7 @@
                     </div>
                   </li>
                   {activeRoute.map((dept, index) => (
-                    <li key={dept.id} className="flex items-start gap-2">
+                    <li key={`${dept.id}-${index}`} className="flex items-start gap-2">
                       <span className="inline-flex items-center justify-center w-6 h-6 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
                         {index + 1}
                       </span>
