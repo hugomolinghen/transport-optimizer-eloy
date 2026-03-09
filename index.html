@@ -92,6 +92,7 @@
 
       const PREMIUM_TRANSPORTER_ID = 4;
       const PREMIUM_RATE_MULTIPLIER = 1.04;
+      const SPRIMONT_COORDINATES = { lat: 50.5333, lon: 5.6203 };
 
       const sanitizeUsername = (username) => {
         if (!username) return "";
@@ -174,7 +175,11 @@
         const list = selectedDeptIds
           .map((id) => departments.find((d) => d.id === id))
           .filter(Boolean)
-          .sort((a, b) => a.km - b.km);
+          .sort((a, b) => {
+            const kmA = Number.isFinite(Number(a.km)) ? Number(a.km) : Number.POSITIVE_INFINITY;
+            const kmB = Number.isFinite(Number(b.km)) ? Number(b.km) : Number.POSITIVE_INFINITY;
+            return kmA - kmB;
+          });
         return list;
       }
 
@@ -2720,7 +2725,6 @@
         }, [departmentSearch, departments]);
 
         const routeDistanceCacheRef = useRef(new Map());
-
         useEffect(() => {
           let isActive = true;
 
@@ -2736,8 +2740,22 @@
               return;
             }
 
+            if (activeRoute.length !== 2) {
+              const directKm = activeRoute
+                .map((dept) => Number(dept?.km))
+                .filter((value) => Number.isFinite(value))
+                .reduce((maxKm, currentKm) => Math.max(maxKm, currentKm), 0);
 
-            const baseCoords = { lat: 50.5333, lon: 5.6203 };
+              if (!isActive) return;
+              setRouteMetrics({
+                totalDistanceKm: directKm,
+                detourKm: 0,
+                loading: false,
+                error: "",
+              });
+              return;
+            }
+
             const deptCoords = activeRoute.map((dept) => {
               if (
                 Number.isFinite(dept?.latitude) &&
@@ -2760,7 +2778,7 @@
               return;
             }
 
-            const coordsList = [baseCoords, ...deptCoords];
+            const coordsList = [SPRIMONT_COORDINATES, ...deptCoords];
 
             setRouteMetrics((prev) => ({ ...prev, loading: true, error: "" }));
             const cache = routeDistanceCacheRef.current;
@@ -2932,6 +2950,8 @@
             const details = [];
             let hasMissingTariff = false;
 
+            const furthestDept = activeRoute[activeRoute.length - 1] || null;
+
             for (let idx = 0; idx < activeRoute.length; idx += 1) {
               const dept = activeRoute[idx];
               const rate = transporter.rates.find((r) => r.deptId === dept.id);
@@ -2952,7 +2972,7 @@
                 `${idx + 1}. ${dept.name} (${dept.km} km): ${selectedRate.value.toFixed(2)}€ (${selectedRate.label})`
               );
 
-              if (furthestCost === null || selectedRate.value >= furthestCost) {
+              if (furthestDept && dept.id === furthestDept.id) {
                 furthestCost = selectedRate.value;
                 furthestDeptDetail = `${dept.name} (${dept.km} km)`;
               }
