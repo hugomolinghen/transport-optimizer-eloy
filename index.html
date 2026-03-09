@@ -2696,16 +2696,6 @@
             .filter(Boolean);
         }, [selectedDepts, departments]);
 
-        const hasDuplicatedDepartments = useMemo(() => {
-          const seen = new Set();
-          for (const deptId of selectedDepts) {
-            if (seen.has(deptId)) {
-              return true;
-            }
-            seen.add(deptId);
-          }
-          return false;
-        }, [selectedDepts]);
 
         const getDepartmentSelectionCount = useCallback(
           (deptId) => selectedDepts.filter((id) => id === deptId).length,
@@ -2743,16 +2733,6 @@
               return;
             }
 
-            if (hasDuplicatedDepartments) {
-              if (!isActive) return;
-              setRouteMetrics({
-                totalDistanceKm: 0,
-                detourKm: 0,
-                loading: false,
-                error: "",
-              });
-              return;
-            }
 
             const baseCoords = { lat: 50.5333, lon: 5.6203 };
             const deptCoords = activeRoute.map((dept) => {
@@ -2891,7 +2871,7 @@
           return () => {
             isActive = false;
           };
-        }, [activeRoute, hasDuplicatedDepartments, isRouteReversed]);
+        }, [activeRoute, isRouteReversed]);
 
         const bestTransporters = useMemo(() => {
           if (!selectedDepts.length || !truckType || !transporters.length) return [];
