@@ -700,84 +700,31 @@
           });
         }, [normalizedLogs, selectedLogResult, selectedLogUser]);
 
-        const logsForAnalytics = useMemo(() => {
-          const safeName = (value, fallback = "") => {
-            const normalized = String(value || "").trim();
-            return normalized || fallback;
-          };
-
-          const transporterPool =
-            rawTransporters
-              .map((item) => safeName(item.name || item.nom, ""))
-              .filter(Boolean)
-              .slice(0, 8) || [];
-
-          const fallbackPool = ["Geodis", "DB Schenker", "Dachser", "Kuehne+Nagel", "XPO", "ID Logistics"];
-          const transportersPool = transporterPool.length ? transporterPool : fallbackPool;
-          const reasonsPool = [
-            "Disponibilité du transporteur",
-            "Difficulté à joindre le transporteur",
-            "Délais de livraison proposés trop longs",
-            "Transporteur inadapté à la zone",
-            "Contraintes internes / planning interne incompatible",
-            "Préférence pour un autre transporteur (organisation interne)",
-          ];
-
-          const targetCount = 120;
-          const syntheticCount = Math.max(0, targetCount - normalizedLogs.length);
-          const syntheticLogs = Array.from({ length: syntheticCount }, (_, index) => {
-            const pick = (offset = 0) => transportersPool[(index * 5 + offset) % transportersPool.length];
-            const choix1 = pick(0);
-            const choix2 = pick(1);
-            const choix3 = pick(2);
-            const selected = index % 3 === 0 ? choix1 : pick(3);
-            const diff = Number(((index % 14) * 8 + 5).toFixed(2));
-            return {
-              id: `fake-${index + 1}`,
-              resultat: selected,
-              choix_1: choix1,
-              choix_2: choix2,
-              choix_3: choix3,
-              raison_1: selected === choix1 ? "" : reasonsPool[(index + 1) % reasonsPool.length],
-              raison_2: reasonsPool[(index + 2) % reasonsPool.length],
-              raison_3: reasonsPool[(index + 3) % reasonsPool.length],
-              difference: selected === choix1 ? 0 : diff,
-            };
-          });
-
-          return {
-            rows: [...normalizedLogs, ...syntheticLogs],
-            syntheticCount,
-          };
-        }, [normalizedLogs, rawTransporters]);
-
         const analyticsTransporterOptions = useMemo(() => {
           const names = new Set();
-          logsForAnalytics.rows.forEach((log) => {
-            [log.resultat, log.choix_1, log.choix_2, log.choix_3].forEach((name) => {
-              const normalized = String(name || "").trim();
-              if (normalized) names.add(normalized);
+          normalizedLogs.forEach((log) => {
+            [log.resultat, log.choix_1, log.choix_2, log.choix_3].forEach((value) => {
+              const name = String(value || "").trim();
+              if (name) names.add(name);
             });
           });
           return Array.from(names).sort((a, b) => a.localeCompare(b, "fr", { numeric: true }));
-        }, [logsForAnalytics]);
+        }, [normalizedLogs]);
 
         const analyticsData = useMemo(() => {
-          const safeName = (value, fallback = "") => {
-            const normalized = String(value || "").trim();
-            return normalized || fallback;
-          };
+          const transporter = selectedAnalyticsTransporter;
 
-          const normalizeForCompare = (value) =>
+          const normalizeReason = (value) =>
             String(value || "")
               .normalize("NFD")
               .replace(/[̀-ͯ]/g, "")
               .toLowerCase()
-              .trim();
+              .trim()
+              .replace(/\s+/g, " ");
 
-          const isIgnorableReason = (reason) => {
-            const normalized = normalizeForCompare(reason).replace(/\s+/g, " ");
-            return ["", "non renseigne", "non rensgine", "non rensigne"].includes(normalized);
+          const isIgnoredReason = (reason) => {
+            const normalized = normalizeReason(reason);
+            return normalized === "" || normalized === "non renseigne" || normalized === "non rensigne" || normalized === "non rensgine";
           };
 
           const toNumber = (value) => {
@@ -786,168 +733,84 @@
             return Number.isFinite(parsed) ? parsed : null;
           };
 
-          const scopedLogs = logsForAnalytics.rows.filter((log) => {
-            if (selectedAnalyticsTransporter === "all") return true;
-            return [log.resultat, log.choix_1, log.choix_2, log.choix_3]
-              .map((value) => safeName(value))
-              .includes(selectedAnalyticsTransporter);
-          });
+          if (transporter === "all") {
+            return {
+              selectedTransporter: "",
+              totalLogs: normalizedLogs.length,
+              inChoice1Count: 0,
+              selectedCount: 0,
+              selectedWhileChoice1Count: 0,
+              choice1ButNotSelectedCount: 0,
+              lostCostWhenChoice1Rejected: 0,
+              averageLostCostWhenChoice1Rejected: 0,
+              notSelectedReasons: [],
+              choice1RejectedReasons: [],
+            };
+          }
 
-          const totalTransports = scopedLogs.length;
-          const selectedCountMap = new Map();
-          let firstChoiceRespected = 0;
-          let firstChoiceNotRespected = 0;
-          let costTotalLost = 0;
-          let costEntryCount = 0;
-          let costTotalWhenFirstChoiceNotSelected = 0;
-          let costCountWhenFirstChoiceNotSelected = 0;
-          const differenceValues = [];
-          const costBySelectedTransporter = new Map();
-          const reasonsByTransporter = new Map();
-          const reasonTotals = new Map();
-          const reasonToTransporter = new Map();
-          const choice1NotSelectedByTransporter = new Map();
-          const choice1NotSelectedCostByTransporter = new Map();
-          const reasonsForChoice1Rejection = new Map();
+          let inChoice1Count = 0;
+          let selectedCount = 0;
+          let selectedWhileChoice1Count = 0;
+          let choice1ButNotSelectedCount = 0;
+          let lostCostWhenChoice1Rejected = 0;
+          let choice1RejectedCostCount = 0;
 
-          let transporterFirstChoiceCount = 0;
-          let transporterSelectedAsFirstChoiceCount = 0;
-          let transporterSelectedCount = 0;
-          let transporterCostLostWhenFirstChoiceRejected = 0;
+          const notSelectedReasonsMap = new Map();
+          const choice1RejectedReasonsMap = new Map();
 
-          scopedLogs.forEach((log) => {
-            const selectedTransporter = safeName(log.resultat, "Non sélectionné");
-            selectedCountMap.set(selectedTransporter, (selectedCountMap.get(selectedTransporter) || 0) + 1);
+          normalizedLogs.forEach((log) => {
+            const result = String(log.resultat || "").trim();
+            const choice1 = String(log.choix_1 || "").trim();
+            const choice2 = String(log.choix_2 || "").trim();
+            const choice3 = String(log.choix_3 || "").trim();
 
-            const firstChoice = safeName(log.choix_1, "");
-            const firstChoiceSelected = firstChoice && firstChoice === selectedTransporter;
-            if (firstChoice && firstChoiceSelected) firstChoiceRespected += 1;
-            else if (firstChoice) firstChoiceNotRespected += 1;
+            if (choice1 === transporter) inChoice1Count += 1;
+            if (result === transporter) selectedCount += 1;
+            if (choice1 === transporter && result === transporter) selectedWhileChoice1Count += 1;
 
-            if (selectedAnalyticsTransporter !== "all") {
-              if (firstChoice === selectedAnalyticsTransporter) transporterFirstChoiceCount += 1;
-              if (selectedTransporter === selectedAnalyticsTransporter) transporterSelectedCount += 1;
-              if (firstChoice === selectedAnalyticsTransporter && firstChoiceSelected) {
-                transporterSelectedAsFirstChoiceCount += 1;
-              }
+            const wasProposedAndNotSelected =
+              result !== transporter && [1, 2, 3].some((idx) => String(log[`choix_${idx}`] || "").trim() === transporter);
+
+            if (wasProposedAndNotSelected) {
+              [1, 2, 3].forEach((idx) => {
+                const choice = String(log[`choix_${idx}`] || "").trim();
+                if (choice !== transporter) return;
+                const reason = String(log[`raison_${idx}`] || "").trim();
+                if (!reason || isIgnoredReason(reason)) return;
+                notSelectedReasonsMap.set(reason, (notSelectedReasonsMap.get(reason) || 0) + 1);
+              });
             }
 
-            const difference = toNumber(log.difference);
-            if (difference !== null) {
-              costTotalLost += difference;
-              costEntryCount += 1;
-              differenceValues.push(difference);
-              costBySelectedTransporter.set(
-                selectedTransporter,
-                (costBySelectedTransporter.get(selectedTransporter) || 0) + difference
-              );
-
-              if (firstChoice && !firstChoiceSelected) {
-                costTotalWhenFirstChoiceNotSelected += difference;
-                costCountWhenFirstChoiceNotSelected += 1;
-                choice1NotSelectedCostByTransporter.set(
-                  firstChoice,
-                  (choice1NotSelectedCostByTransporter.get(firstChoice) || 0) + difference
-                );
-                if (selectedAnalyticsTransporter !== "all" && firstChoice === selectedAnalyticsTransporter) {
-                  transporterCostLostWhenFirstChoiceRejected += difference;
-                }
+            if (choice1 === transporter && result !== transporter) {
+              choice1ButNotSelectedCount += 1;
+              const reason = String(log.raison_1 || "").trim();
+              if (reason && !isIgnoredReason(reason)) {
+                choice1RejectedReasonsMap.set(reason, (choice1RejectedReasonsMap.get(reason) || 0) + 1);
               }
-            }
-
-            [1, 2, 3].forEach((idx) => {
-              const choice = safeName(log[`choix_${idx}`], "");
-              const reason = safeName(log[`raison_${idx}`], "");
-              if (!choice || !reason || isIgnorableReason(reason)) return;
-
-              if (!reasonsByTransporter.has(choice)) reasonsByTransporter.set(choice, new Map());
-              const transporterReasons = reasonsByTransporter.get(choice);
-              transporterReasons.set(reason, (transporterReasons.get(reason) || 0) + 1);
-
-              reasonTotals.set(reason, (reasonTotals.get(reason) || 0) + 1);
-              if (!reasonToTransporter.has(reason)) reasonToTransporter.set(reason, new Map());
-              const reasonTransporters = reasonToTransporter.get(reason);
-              reasonTransporters.set(choice, (reasonTransporters.get(choice) || 0) + 1);
-            });
-
-            if (firstChoice && !firstChoiceSelected) {
-              choice1NotSelectedByTransporter.set(firstChoice, (choice1NotSelectedByTransporter.get(firstChoice) || 0) + 1);
-              const rejectReason = safeName(log.raison_1, "");
-              if (rejectReason && !isIgnorableReason(rejectReason)) {
-                reasonsForChoice1Rejection.set(
-                  rejectReason,
-                  (reasonsForChoice1Rejection.get(rejectReason) || 0) + 1
-                );
+              const diff = toNumber(log.difference);
+              if (diff !== null) {
+                lostCostWhenChoice1Rejected += diff;
+                choice1RejectedCostCount += 1;
               }
             }
           });
 
-          const toSortedEntries = (map, sort = "desc") =>
-            Array.from(map.entries()).sort((a, b) =>
-              sort === "asc" ? a[0].localeCompare(b[0], "fr", { numeric: true }) : b[1] - a[1]
-            );
-
-          const selectedCounts = toSortedEntries(selectedCountMap).map(([name, count]) => ({
-            name,
-            count,
-            share: totalTransports ? (count / totalTransports) * 100 : 0,
-          }));
-
-          const reasonsByTransporterRows = toSortedEntries(reasonsByTransporter, "asc").map(([transporter, reasonsMap]) => ({
-            transporter,
-            reasons: toSortedEntries(reasonsMap).map(([reason, count]) => ({ reason, count })),
-          }));
-
-          const reasonRows = toSortedEntries(reasonTotals).map(([reason, total]) => ({
-            reason,
-            total,
-            transporters: toSortedEntries(reasonToTransporter.get(reason) || new Map()).map(
-              ([transporter, count]) => ({ transporter, count })
-            ),
-          }));
-
-          const choice1NotSelectedRows = toSortedEntries(choice1NotSelectedByTransporter).map(([transporter, count]) => ({
-            transporter,
-            count,
-            totalCost: choice1NotSelectedCostByTransporter.get(transporter) || 0,
-            averageCost: count > 0 ? (choice1NotSelectedCostByTransporter.get(transporter) || 0) / count : 0,
-          }));
+          const sortEntries = (map) => Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
 
           return {
-            totalTransports,
-            selectedCounts,
-            firstChoiceRespected,
-            firstChoiceNotRespected,
-            firstChoiceRespectRate:
-              firstChoiceRespected + firstChoiceNotRespected
-                ? (firstChoiceRespected / (firstChoiceRespected + firstChoiceNotRespected)) * 100
-                : 0,
-            costTotalLost,
-            averageLostCost: costEntryCount ? costTotalLost / costEntryCount : 0,
-            averageLostCostWithoutChoice1: costCountWhenFirstChoiceNotSelected
-              ? costTotalWhenFirstChoiceNotSelected / costCountWhenFirstChoiceNotSelected
-              : 0,
-            costBySelectedTransporter: toSortedEntries(costBySelectedTransporter),
-            differenceValues,
-            reasonsByTransporterRows,
-            reasonRows,
-            choice1NotSelectedRows,
-            reasonsForChoice1Rejection: toSortedEntries(reasonsForChoice1Rejection),
-            transporterFocus:
-              selectedAnalyticsTransporter === "all"
-                ? null
-                : {
-                    name: selectedAnalyticsTransporter,
-                    firstChoiceCount: transporterFirstChoiceCount,
-                    selectedAsFirstChoiceCount: transporterSelectedAsFirstChoiceCount,
-                    selectedCount: transporterSelectedCount,
-                    lostCostWhenRejected: transporterCostLostWhenFirstChoiceRejected,
-                    topReasons:
-                      reasonsByTransporterRows.find((row) => row.transporter === selectedAnalyticsTransporter)?.reasons || [],
-                  },
-            syntheticCount: logsForAnalytics.syntheticCount,
+            selectedTransporter: transporter,
+            totalLogs: normalizedLogs.length,
+            inChoice1Count,
+            selectedCount,
+            selectedWhileChoice1Count,
+            choice1ButNotSelectedCount,
+            lostCostWhenChoice1Rejected,
+            averageLostCostWhenChoice1Rejected:
+              choice1RejectedCostCount > 0 ? lostCostWhenChoice1Rejected / choice1RejectedCostCount : 0,
+            notSelectedReasons: sortEntries(notSelectedReasonsMap).map(([reason, count]) => ({ reason, count })),
+            choice1RejectedReasons: sortEntries(choice1RejectedReasonsMap).map(([reason, count]) => ({ reason, count })),
           };
-        }, [logsForAnalytics, selectedAnalyticsTransporter]);
+        }, [normalizedLogs, selectedAnalyticsTransporter]);
 
         const formatCurrency = (value) =>
           new Intl.NumberFormat("fr-FR", {
@@ -2333,19 +2196,15 @@
                     </>
                   ) : (
                     <div className="space-y-6">
-                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                        Jeu d'exemple injecté automatiquement pour lecture des KPI : {analyticsData.syntheticCount} ligne(s) fake.
-                      </div>
-
                       <div className="grid gap-3 md:grid-cols-2">
                         <label className="text-sm text-gray-700">
-                          <span className="mb-1 block font-medium">Filtrer sur un transporteur (vue dédiée)</span>
+                          <span className="mb-1 block font-medium">Transporteur à analyser</span>
                           <select
                             value={selectedAnalyticsTransporter}
                             onChange={(event) => setSelectedAnalyticsTransporter(event.target.value)}
                             className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none"
                           >
-                            <option value="all">Tous les transporteurs</option>
+                            <option value="all">Sélectionnez un transporteur</option>
                             {analyticsTransporterOptions.map((name) => (
                               <option key={`analytics-${name}`} value={name}>
                                 {name}
@@ -2355,146 +2214,105 @@
                         </label>
                       </div>
 
-                      {analyticsData.transporterFocus && (
-                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                          <div className="rounded-xl border border-gray-200 bg-white p-4">
-                            <p className="text-xs uppercase tracking-wide text-gray-500">Nb fois en choix 1</p>
-                            <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.transporterFocus.firstChoiceCount}</p>
-                          </div>
-                          <div className="rounded-xl border border-gray-200 bg-white p-4">
-                            <p className="text-xs uppercase tracking-wide text-gray-500">Pris alors que choix 1</p>
-                            <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.transporterFocus.selectedAsFirstChoiceCount}</p>
-                          </div>
-                          <div className="rounded-xl border border-gray-200 bg-white p-4">
-                            <p className="text-xs uppercase tracking-wide text-gray-500">Nb fois sélectionné</p>
-                            <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.transporterFocus.selectedCount}</p>
-                          </div>
-                          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
-                            <p className="text-xs uppercase tracking-wide text-rose-700">Perte € si choix 1 rejeté</p>
-                            <p className="mt-2 text-2xl font-bold text-rose-700">{formatCurrency(analyticsData.transporterFocus.lostCostWhenRejected)}</p>
-                          </div>
-                          <div className="rounded-xl border border-gray-200 bg-white p-4">
-                            <p className="text-xs uppercase tracking-wide text-gray-500">Top raisons (transporteur)</p>
-                            <p className="mt-2 text-sm font-medium text-gray-700">
-                              {analyticsData.transporterFocus.topReasons.slice(0, 2).map((item) => item.reason).join(" • ") || "—"}
-                            </p>
-                          </div>
+                      {selectedAnalyticsTransporter === "all" ? (
+                        <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-6 py-10 text-center text-gray-500">
+                          Choisissez un transporteur pour afficher ses KPI et les raisons de non-sélection.
                         </div>
-                      )}
+                      ) : (
+                        <>
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Présent en choix 1</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.inChoice1Count}</p>
+                            </div>
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Nombre de fois sélectionné</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.selectedCount}</p>
+                            </div>
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Sélectionné quand en choix 1</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.selectedWhileChoice1Count}</p>
+                            </div>
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                              <p className="text-xs uppercase tracking-wide text-amber-700">Choix 1 mais non sélectionné</p>
+                              <p className="mt-2 text-2xl font-bold text-amber-700">{analyticsData.choice1ButNotSelectedCount}</p>
+                            </div>
+                            <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                              <p className="text-xs uppercase tracking-wide text-rose-700">Perte liée (choix 1 non retenu)</p>
+                              <p className="mt-2 text-2xl font-bold text-rose-700">{formatCurrency(analyticsData.lostCostWhenChoice1Rejected)}</p>
+                            </div>
+                          </div>
 
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <p className="text-xs uppercase tracking-wide text-gray-500">Transports total</p>
-                          <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.totalTransports}</p>
-                        </div>
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <p className="text-xs uppercase tracking-wide text-gray-500">Choix 1 respecté</p>
-                          <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.firstChoiceRespected}</p>
-                        </div>
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <p className="text-xs uppercase tracking-wide text-gray-500">Choix 1 non respecté</p>
-                          <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.firstChoiceNotRespected}</p>
-                        </div>
-                        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-                          <p className="text-xs uppercase tracking-wide text-indigo-700">Taux respect choix 1</p>
-                          <p className="mt-2 text-2xl font-bold text-indigo-700">{formatPercent(analyticsData.firstChoiceRespectRate)}</p>
-                        </div>
-                      </div>
-
-                      <div className="grid gap-6 lg:grid-cols-2">
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Transports par transporteur</h3>
-                          <div className="mt-4 space-y-2">
-                            {analyticsData.selectedCounts.map((item) => {
-                              const maxValue = analyticsData.selectedCounts[0]?.count || 1;
-                              const width = maxValue ? (item.count / maxValue) * 100 : 0;
-                              return (
-                                <div key={item.name}>
-                                  <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
-                                    <span>{item.name}</span>
-                                    <span>{item.count}</span>
-                                  </div>
-                                  <div className="h-2 rounded-full bg-gray-100">
-                                    <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${width}%` }} />
-                                  </div>
-                                </div>
-                              );
-                            })}
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Coût moyen par rejet du choix 1</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{formatCurrency(analyticsData.averageLostCostWhenChoice1Rejected)}</p>
+                            </div>
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Total logs analysés</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.totalLogs}</p>
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Répartition (%) des transporteurs</h3>
-                          <div className="mt-4 space-y-2 text-sm text-gray-700">
-                            {analyticsData.selectedCounts.map((item) => (
-                              <div key={`share-${item.name}`} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2">
-                                <span>{item.name}</span>
-                                <span>{formatPercent(item.share)}</span>
+                          <div className="grid gap-6 lg:grid-cols-2">
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <h3 className="text-sm font-semibold text-gray-700">Raisons de non-sélection (tous les cas)</h3>
+                              <p className="mt-1 text-xs text-gray-500">
+                                Cas où ce transporteur apparaissait en choix 1/2/3 mais n'a pas été sélectionné.
+                              </p>
+                              <div className="mt-4 space-y-2">
+                                {analyticsData.notSelectedReasons.length ? (
+                                  analyticsData.notSelectedReasons.map((item) => {
+                                    const maxValue = analyticsData.notSelectedReasons[0]?.count || 1;
+                                    const width = maxValue ? (item.count / maxValue) * 100 : 0;
+                                    return (
+                                      <div key={`not-selected-${item.reason}`}>
+                                        <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
+                                          <span>{item.reason}</span>
+                                          <span>{item.count}</span>
+                                        </div>
+                                        <div className="h-2 rounded-full bg-gray-100">
+                                          <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${width}%` }} />
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                ) : (
+                                  <p className="text-sm text-gray-500">Aucune raison disponible sur ce périmètre.</p>
+                                )}
                               </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
+                            </div>
 
-                      <div className="grid gap-6 lg:grid-cols-2">
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Raisons de non sélection par transporteur</h3>
-                          <div className="mt-4 overflow-x-auto">
-                            <table className="min-w-full divide-y divide-gray-200 text-sm">
-                              <thead className="bg-gray-50">
-                                <tr>
-                                  <th className="px-3 py-2 text-left">Transporteur</th>
-                                  <th className="px-3 py-2 text-left">Top raisons (raison: nb)</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100 bg-white">
-                                {analyticsData.reasonsByTransporterRows.map((row) => (
-                                  <tr key={row.transporter}>
-                                    <td className="px-3 py-2 font-medium text-gray-700">{row.transporter}</td>
-                                    <td className="px-3 py-2 text-gray-600">{row.reasons.slice(0, 5).map((item) => `${item.reason}: ${item.count}`).join(" • ") || "—"}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <h3 className="text-sm font-semibold text-gray-700">Raisons quand il était choix 1 mais non retenu</h3>
+                              <p className="mt-1 text-xs text-gray-500">
+                                Cas stricts `choix_1 = {selectedAnalyticsTransporter}` et `resultat ≠ {selectedAnalyticsTransporter}`.
+                              </p>
+                              <div className="mt-4 space-y-2">
+                                {analyticsData.choice1RejectedReasons.length ? (
+                                  analyticsData.choice1RejectedReasons.map((item) => {
+                                    const maxValue = analyticsData.choice1RejectedReasons[0]?.count || 1;
+                                    const width = maxValue ? (item.count / maxValue) * 100 : 0;
+                                    return (
+                                      <div key={`choice1-rejected-${item.reason}`}>
+                                        <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
+                                          <span>{item.reason}</span>
+                                          <span>{item.count}</span>
+                                        </div>
+                                        <div className="h-2 rounded-full bg-gray-100">
+                                          <div className="h-2 rounded-full bg-rose-500" style={{ width: `${width}%` }} />
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                ) : (
+                                  <p className="text-sm text-gray-500">Aucune raison disponible pour ces cas.</p>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Fréquence des raisons</h3>
-                          <div className="mt-4 space-y-2">
-                            {analyticsData.reasonRows.map((row) => {
-                              const maxValue = analyticsData.reasonRows[0]?.total || 1;
-                              const width = maxValue ? (row.total / maxValue) * 100 : 0;
-                              return (
-                                <div key={`reason-${row.reason}`}>
-                                  <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
-                                    <span>{row.reason}</span>
-                                    <span>{row.total}</span>
-                                  </div>
-                                  <div className="h-2 rounded-full bg-gray-100">
-                                    <div className="h-2 rounded-full bg-cyan-500" style={{ width: `${width}%` }} />
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-3">
-                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                          <p className="text-xs uppercase tracking-wide text-emerald-700">Coût total perdu</p>
-                          <p className="mt-2 text-2xl font-bold text-emerald-700">{formatCurrency(analyticsData.costTotalLost)}</p>
-                        </div>
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <p className="text-xs uppercase tracking-wide text-gray-500">Coût moyen / transport</p>
-                          <p className="mt-2 text-2xl font-bold text-gray-800">{formatCurrency(analyticsData.averageLostCost)}</p>
-                        </div>
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <p className="text-xs uppercase tracking-wide text-gray-500">Coût moyen si choix 1 rejeté</p>
-                          <p className="mt-2 text-2xl font-bold text-gray-800">{formatCurrency(analyticsData.averageLostCostWithoutChoice1)}</p>
-                        </div>
-                      </div>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
