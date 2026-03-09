@@ -2736,6 +2736,22 @@
               return;
             }
 
+            if (activeRoute.length === 1) {
+              const selectedDepartmentKm = Number(activeRoute[0]?.km);
+
+              if (!isActive) return;
+
+              setRouteMetrics({
+                totalDistanceKm: Number.isFinite(selectedDepartmentKm)
+                  ? selectedDepartmentKm
+                  : 0,
+                detourKm: 0,
+                loading: false,
+                error: "",
+              });
+              return;
+            }
+
 
             const baseCoords = { lat: 50.5333, lon: 5.6203 };
             const deptCoords = activeRoute.map((dept) => {
