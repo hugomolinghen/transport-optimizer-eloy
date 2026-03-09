@@ -218,6 +218,7 @@
         const [selectedExportTransporters, setSelectedExportTransporters] = useState([]);
         const [selectedLogResult, setSelectedLogResult] = useState("all");
         const [selectedLogUser, setSelectedLogUser] = useState("all");
+        const [selectedAnalyticsTransporter, setSelectedAnalyticsTransporter] = useState("all");
         const fileInputRef = useRef(null);
 
         const normalizeNumber = (value) => {
@@ -698,6 +699,168 @@
             return matchResult && matchUser;
           });
         }, [normalizedLogs, selectedLogResult, selectedLogUser]);
+
+        const analyticsTransporterOptions = useMemo(() => {
+          const names = new Set();
+          normalizedLogs.forEach((log) => {
+            [log.resultat, log.choix_1, log.choix_2, log.choix_3].forEach((value) => {
+              const name = String(value || "").trim();
+              if (name) names.add(name);
+            });
+          });
+          return Array.from(names).sort((a, b) => a.localeCompare(b, "fr", { numeric: true }));
+        }, [normalizedLogs]);
+
+        const analyticsData = useMemo(() => {
+          const transporter = selectedAnalyticsTransporter;
+
+          const normalizeReason = (value) =>
+            String(value || "")
+              .normalize("NFD")
+              .replace(/[̀-ͯ]/g, "")
+              .toLowerCase()
+              .trim()
+              .replace(/\s+/g, " ");
+
+          const isIgnoredReason = (reason) => {
+            const normalized = normalizeReason(reason);
+            return normalized === "" || normalized === "non renseigne" || normalized === "non rensigne" || normalized === "non rensgine";
+          };
+
+          const toNumber = (value) => {
+            if (value === null || value === undefined || value === "") return null;
+            const parsed = Number(String(value).replace(",", "."));
+            return Number.isFinite(parsed) ? parsed : null;
+          };
+
+          if (transporter === "all") {
+            let totalLogs = normalizedLogs.length;
+            let firstChoiceSelectedCount = 0;
+            let firstChoiceNotSelectedCount = 0;
+            let totalLostCostWhenChoice1Rejected = 0;
+            let rejectedCostCount = 0;
+            const globalReasonsMap = new Map();
+
+            normalizedLogs.forEach((log) => {
+              const result = String(log.resultat || "").trim();
+              const choice1 = String(log.choix_1 || "").trim();
+
+              if (choice1) {
+                if (choice1 === result) {
+                  firstChoiceSelectedCount += 1;
+                } else {
+                  firstChoiceNotSelectedCount += 1;
+                  const diff = toNumber(log.difference);
+                  if (diff !== null) {
+                    totalLostCostWhenChoice1Rejected += diff;
+                    rejectedCostCount += 1;
+                  }
+                }
+              }
+
+              [1, 2, 3].forEach((idx) => {
+                const reason = String(log[`raison_${idx}`] || "").trim();
+                if (!reason || isIgnoredReason(reason)) return;
+                globalReasonsMap.set(reason, (globalReasonsMap.get(reason) || 0) + 1);
+              });
+            });
+
+            const sortedReasons = Array.from(globalReasonsMap.entries())
+              .sort((a, b) => b[1] - a[1])
+              .map(([reason, count]) => ({ reason, count }));
+
+            return {
+              selectedTransporter: "",
+              totalLogs,
+              inChoice1Count: 0,
+              selectedCount: 0,
+              selectedWhileChoice1Count: 0,
+              choice1ButNotSelectedCount: firstChoiceNotSelectedCount,
+              lostCostWhenChoice1Rejected: totalLostCostWhenChoice1Rejected,
+              averageLostCostWhenChoice1Rejected:
+                rejectedCostCount > 0 ? totalLostCostWhenChoice1Rejected / rejectedCostCount : 0,
+              notSelectedReasons: sortedReasons,
+              choice1RejectedReasons: sortedReasons,
+              firstChoiceSelectedCount,
+              firstChoiceNotSelectedCount,
+            };
+          }
+
+          let inChoice1Count = 0;
+          let selectedCount = 0;
+          let selectedWhileChoice1Count = 0;
+          let choice1ButNotSelectedCount = 0;
+          let lostCostWhenChoice1Rejected = 0;
+          let choice1RejectedCostCount = 0;
+
+          const notSelectedReasonsMap = new Map();
+          const choice1RejectedReasonsMap = new Map();
+
+          normalizedLogs.forEach((log) => {
+            const result = String(log.resultat || "").trim();
+            const choice1 = String(log.choix_1 || "").trim();
+            const choice2 = String(log.choix_2 || "").trim();
+            const choice3 = String(log.choix_3 || "").trim();
+
+            if (choice1 === transporter) inChoice1Count += 1;
+            if (result === transporter) selectedCount += 1;
+            if (choice1 === transporter && result === transporter) selectedWhileChoice1Count += 1;
+
+            const wasProposedAndNotSelected =
+              result !== transporter && [1, 2, 3].some((idx) => String(log[`choix_${idx}`] || "").trim() === transporter);
+
+            if (wasProposedAndNotSelected) {
+              [1, 2, 3].forEach((idx) => {
+                const choice = String(log[`choix_${idx}`] || "").trim();
+                if (choice !== transporter) return;
+                const reason = String(log[`raison_${idx}`] || "").trim();
+                if (!reason || isIgnoredReason(reason)) return;
+                notSelectedReasonsMap.set(reason, (notSelectedReasonsMap.get(reason) || 0) + 1);
+              });
+            }
+
+            if (choice1 === transporter && result !== transporter) {
+              choice1ButNotSelectedCount += 1;
+              const reason = String(log.raison_1 || "").trim();
+              if (reason && !isIgnoredReason(reason)) {
+                choice1RejectedReasonsMap.set(reason, (choice1RejectedReasonsMap.get(reason) || 0) + 1);
+              }
+              const diff = toNumber(log.difference);
+              if (diff !== null) {
+                lostCostWhenChoice1Rejected += diff;
+                choice1RejectedCostCount += 1;
+              }
+            }
+          });
+
+          const sortEntries = (map) => Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+
+          return {
+            selectedTransporter: transporter,
+            totalLogs: normalizedLogs.length,
+            inChoice1Count,
+            selectedCount,
+            selectedWhileChoice1Count,
+            choice1ButNotSelectedCount,
+            lostCostWhenChoice1Rejected,
+            averageLostCostWhenChoice1Rejected:
+              choice1RejectedCostCount > 0 ? lostCostWhenChoice1Rejected / choice1RejectedCostCount : 0,
+            notSelectedReasons: sortEntries(notSelectedReasonsMap).map(([reason, count]) => ({ reason, count })),
+            choice1RejectedReasons: sortEntries(choice1RejectedReasonsMap).map(([reason, count]) => ({ reason, count })),
+            firstChoiceSelectedCount: selectedWhileChoice1Count,
+            firstChoiceNotSelectedCount: choice1ButNotSelectedCount,
+          };
+        }, [normalizedLogs, selectedAnalyticsTransporter]);
+
+        const formatCurrency = (value) =>
+          new Intl.NumberFormat("fr-FR", {
+            style: "currency",
+            currency: "EUR",
+            maximumFractionDigits: 2,
+          }).format(Number.isFinite(value) ? value : 0);
+
+        const formatPercent = (value) =>
+          `${Number.isFinite(value) ? value.toFixed(1) : "0.0"}%`;
 
         const formatDateValue = (value) => {
           if (!value) return "";
@@ -2072,8 +2235,177 @@
                       )}
                     </>
                   ) : (
-                    <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-6 py-12 text-center text-gray-500">
-                      Onglet Rapport prêt pour les futurs graphiques.
+                    <div className="space-y-6">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="text-sm text-gray-700">
+                          <span className="mb-1 block font-medium">Transporteur à analyser</span>
+                          <select
+                            value={selectedAnalyticsTransporter}
+                            onChange={(event) => setSelectedAnalyticsTransporter(event.target.value)}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="all">Sélectionnez un transporteur</option>
+                            {analyticsTransporterOptions.map((name) => (
+                              <option key={`analytics-${name}`} value={name}>
+                                {name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      {selectedAnalyticsTransporter === "all" ? (
+                        <>
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Nombre de transports</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.totalLogs}</p>
+                            </div>
+                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                              <p className="text-xs uppercase tracking-wide text-emerald-700">Choix 1 sélectionné</p>
+                              <p className="mt-2 text-2xl font-bold text-emerald-700">{analyticsData.firstChoiceSelectedCount}</p>
+                            </div>
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                              <p className="text-xs uppercase tracking-wide text-amber-700">Autre transporteur sélectionné</p>
+                              <p className="mt-2 text-2xl font-bold text-amber-700">{analyticsData.firstChoiceNotSelectedCount}</p>
+                            </div>
+                            <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                              <p className="text-xs uppercase tracking-wide text-rose-700">Perte totale (choix 1 non retenu)</p>
+                              <p className="mt-2 text-2xl font-bold text-rose-700">{formatCurrency(analyticsData.lostCostWhenChoice1Rejected)}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Coût moyen par rejet du choix 1</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{formatCurrency(analyticsData.averageLostCostWhenChoice1Rejected)}</p>
+                            </div>
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Taux de respect du choix 1</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.totalLogs ? formatPercent((analyticsData.firstChoiceSelectedCount / analyticsData.totalLogs) * 100) : "0.0%"}</p>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-gray-200 bg-white p-4">
+                            <h3 className="text-sm font-semibold text-gray-700">Raisons les plus fréquentes</h3>
+                            <div className="mt-4 space-y-2">
+                              {analyticsData.notSelectedReasons.length ? (
+                                analyticsData.notSelectedReasons.map((item) => {
+                                  const maxValue = analyticsData.notSelectedReasons[0]?.count || 1;
+                                  const width = maxValue ? (item.count / maxValue) * 100 : 0;
+                                  return (
+                                    <div key={`global-reason-${item.reason}`}>
+                                      <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
+                                        <span>{item.reason}</span>
+                                        <span>{item.count}</span>
+                                      </div>
+                                      <div className="h-2 rounded-full bg-gray-100">
+                                        <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${width}%` }} />
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <p className="text-sm text-gray-500">Aucune raison disponible.</p>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Présent en choix 1</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.inChoice1Count}</p>
+                            </div>
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Nombre de fois sélectionné</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.selectedCount}</p>
+                            </div>
+                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                              <p className="text-xs uppercase tracking-wide text-emerald-700">Sélectionné quand en choix 1</p>
+                              <p className="mt-2 text-2xl font-bold text-emerald-700">{analyticsData.selectedWhileChoice1Count}</p>
+                            </div>
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                              <p className="text-xs uppercase tracking-wide text-amber-700">Choix 1 mais non sélectionné</p>
+                              <p className="mt-2 text-2xl font-bold text-amber-700">{analyticsData.choice1ButNotSelectedCount}</p>
+                            </div>
+                            <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                              <p className="text-xs uppercase tracking-wide text-rose-700">Perte liée (choix 1 non retenu)</p>
+                              <p className="mt-2 text-2xl font-bold text-rose-700">{formatCurrency(analyticsData.lostCostWhenChoice1Rejected)}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Coût moyen par rejet du choix 1</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{formatCurrency(analyticsData.averageLostCostWhenChoice1Rejected)}</p>
+                            </div>
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Total logs analysés</p>
+                              <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.totalLogs}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-6 lg:grid-cols-2">
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <h3 className="text-sm font-semibold text-gray-700">Raisons de non-sélection (tous les cas)</h3>
+                              <p className="mt-1 text-xs text-gray-500">
+                                Cas où ce transporteur apparaissait en choix 1/2/3 mais n'a pas été sélectionné.
+                              </p>
+                              <div className="mt-4 space-y-2">
+                                {analyticsData.notSelectedReasons.length ? (
+                                  analyticsData.notSelectedReasons.map((item) => {
+                                    const maxValue = analyticsData.notSelectedReasons[0]?.count || 1;
+                                    const width = maxValue ? (item.count / maxValue) * 100 : 0;
+                                    return (
+                                      <div key={`not-selected-${item.reason}`}>
+                                        <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
+                                          <span>{item.reason}</span>
+                                          <span>{item.count}</span>
+                                        </div>
+                                        <div className="h-2 rounded-full bg-gray-100">
+                                          <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${width}%` }} />
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                ) : (
+                                  <p className="text-sm text-gray-500">Aucune raison disponible sur ce périmètre.</p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="rounded-xl border border-gray-200 bg-white p-4">
+                              <h3 className="text-sm font-semibold text-gray-700">Raisons quand il était choix 1 mais non retenu</h3>
+                              <p className="mt-1 text-xs text-gray-500">
+                                Cas stricts `choix_1 = {selectedAnalyticsTransporter}` et `resultat ≠ {selectedAnalyticsTransporter}`.
+                              </p>
+                              <div className="mt-4 space-y-2">
+                                {analyticsData.choice1RejectedReasons.length ? (
+                                  analyticsData.choice1RejectedReasons.map((item) => {
+                                    const maxValue = analyticsData.choice1RejectedReasons[0]?.count || 1;
+                                    const width = maxValue ? (item.count / maxValue) * 100 : 0;
+                                    return (
+                                      <div key={`choice1-rejected-${item.reason}`}>
+                                        <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
+                                          <span>{item.reason}</span>
+                                          <span>{item.count}</span>
+                                        </div>
+                                        <div className="h-2 rounded-full bg-gray-100">
+                                          <div className="h-2 rounded-full bg-rose-500" style={{ width: `${width}%` }} />
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                ) : (
+                                  <p className="text-sm text-gray-500">Aucune raison disponible pour ces cas.</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
