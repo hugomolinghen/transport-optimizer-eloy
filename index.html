@@ -218,6 +218,7 @@
         const [selectedExportTransporters, setSelectedExportTransporters] = useState([]);
         const [selectedLogResult, setSelectedLogResult] = useState("all");
         const [selectedLogUser, setSelectedLogUser] = useState("all");
+        const [selectedAnalyticsTransporter, setSelectedAnalyticsTransporter] = useState("all");
         const fileInputRef = useRef(null);
 
         const normalizeNumber = (value) => {
@@ -699,10 +700,84 @@
           });
         }, [normalizedLogs, selectedLogResult, selectedLogUser]);
 
-        const analyticsData = useMemo(() => {
-          const safeName = (value, fallback = "Non renseigné") => {
+        const logsForAnalytics = useMemo(() => {
+          const safeName = (value, fallback = "") => {
             const normalized = String(value || "").trim();
             return normalized || fallback;
+          };
+
+          const transporterPool =
+            rawTransporters
+              .map((item) => safeName(item.name || item.nom, ""))
+              .filter(Boolean)
+              .slice(0, 8) || [];
+
+          const fallbackPool = ["Geodis", "DB Schenker", "Dachser", "Kuehne+Nagel", "XPO", "ID Logistics"];
+          const transportersPool = transporterPool.length ? transporterPool : fallbackPool;
+          const reasonsPool = [
+            "Disponibilité du transporteur",
+            "Difficulté à joindre le transporteur",
+            "Délais de livraison proposés trop longs",
+            "Transporteur inadapté à la zone",
+            "Contraintes internes / planning interne incompatible",
+            "Préférence pour un autre transporteur (organisation interne)",
+          ];
+
+          const targetCount = 120;
+          const syntheticCount = Math.max(0, targetCount - normalizedLogs.length);
+          const syntheticLogs = Array.from({ length: syntheticCount }, (_, index) => {
+            const pick = (offset = 0) => transportersPool[(index * 5 + offset) % transportersPool.length];
+            const choix1 = pick(0);
+            const choix2 = pick(1);
+            const choix3 = pick(2);
+            const selected = index % 3 === 0 ? choix1 : pick(3);
+            const diff = Number(((index % 14) * 8 + 5).toFixed(2));
+            return {
+              id: `fake-${index + 1}`,
+              resultat: selected,
+              choix_1: choix1,
+              choix_2: choix2,
+              choix_3: choix3,
+              raison_1: selected === choix1 ? "" : reasonsPool[(index + 1) % reasonsPool.length],
+              raison_2: reasonsPool[(index + 2) % reasonsPool.length],
+              raison_3: reasonsPool[(index + 3) % reasonsPool.length],
+              difference: selected === choix1 ? 0 : diff,
+            };
+          });
+
+          return {
+            rows: [...normalizedLogs, ...syntheticLogs],
+            syntheticCount,
+          };
+        }, [normalizedLogs, rawTransporters]);
+
+        const analyticsTransporterOptions = useMemo(() => {
+          const names = new Set();
+          logsForAnalytics.rows.forEach((log) => {
+            [log.resultat, log.choix_1, log.choix_2, log.choix_3].forEach((name) => {
+              const normalized = String(name || "").trim();
+              if (normalized) names.add(normalized);
+            });
+          });
+          return Array.from(names).sort((a, b) => a.localeCompare(b, "fr", { numeric: true }));
+        }, [logsForAnalytics]);
+
+        const analyticsData = useMemo(() => {
+          const safeName = (value, fallback = "") => {
+            const normalized = String(value || "").trim();
+            return normalized || fallback;
+          };
+
+          const normalizeForCompare = (value) =>
+            String(value || "")
+              .normalize("NFD")
+              .replace(/[̀-ͯ]/g, "")
+              .toLowerCase()
+              .trim();
+
+          const isIgnorableReason = (reason) => {
+            const normalized = normalizeForCompare(reason).replace(/\s+/g, " ");
+            return ["", "non renseigne", "non rensgine", "non rensigne"].includes(normalized);
           };
 
           const toNumber = (value) => {
@@ -711,7 +786,14 @@
             return Number.isFinite(parsed) ? parsed : null;
           };
 
-          const totalTransports = normalizedLogs.length;
+          const scopedLogs = logsForAnalytics.rows.filter((log) => {
+            if (selectedAnalyticsTransporter === "all") return true;
+            return [log.resultat, log.choix_1, log.choix_2, log.choix_3]
+              .map((value) => safeName(value))
+              .includes(selectedAnalyticsTransporter);
+          });
+
+          const totalTransports = scopedLogs.length;
           const selectedCountMap = new Map();
           let firstChoiceRespected = 0;
           let firstChoiceNotRespected = 0;
@@ -727,21 +809,27 @@
           const choice1NotSelectedByTransporter = new Map();
           const choice1NotSelectedCostByTransporter = new Map();
           const reasonsForChoice1Rejection = new Map();
-          const choice1ReasonHeatmap = new Map();
 
-          normalizedLogs.forEach((log) => {
+          let transporterFirstChoiceCount = 0;
+          let transporterSelectedAsFirstChoiceCount = 0;
+          let transporterSelectedCount = 0;
+          let transporterCostLostWhenFirstChoiceRejected = 0;
+
+          scopedLogs.forEach((log) => {
             const selectedTransporter = safeName(log.resultat, "Non sélectionné");
-            selectedCountMap.set(
-              selectedTransporter,
-              (selectedCountMap.get(selectedTransporter) || 0) + 1
-            );
+            selectedCountMap.set(selectedTransporter, (selectedCountMap.get(selectedTransporter) || 0) + 1);
 
             const firstChoice = safeName(log.choix_1, "");
             const firstChoiceSelected = firstChoice && firstChoice === selectedTransporter;
-            if (firstChoice && firstChoiceSelected) {
-              firstChoiceRespected += 1;
-            } else if (firstChoice) {
-              firstChoiceNotRespected += 1;
+            if (firstChoice && firstChoiceSelected) firstChoiceRespected += 1;
+            else if (firstChoice) firstChoiceNotRespected += 1;
+
+            if (selectedAnalyticsTransporter !== "all") {
+              if (firstChoice === selectedAnalyticsTransporter) transporterFirstChoiceCount += 1;
+              if (selectedTransporter === selectedAnalyticsTransporter) transporterSelectedCount += 1;
+              if (firstChoice === selectedAnalyticsTransporter && firstChoiceSelected) {
+                transporterSelectedAsFirstChoiceCount += 1;
+              }
             }
 
             const difference = toNumber(log.difference);
@@ -761,13 +849,16 @@
                   firstChoice,
                   (choice1NotSelectedCostByTransporter.get(firstChoice) || 0) + difference
                 );
+                if (selectedAnalyticsTransporter !== "all" && firstChoice === selectedAnalyticsTransporter) {
+                  transporterCostLostWhenFirstChoiceRejected += difference;
+                }
               }
             }
 
             [1, 2, 3].forEach((idx) => {
               const choice = safeName(log[`choix_${idx}`], "");
               const reason = safeName(log[`raison_${idx}`], "");
-              if (!choice || !reason) return;
+              if (!choice || !reason || isIgnorableReason(reason)) return;
 
               if (!reasonsByTransporter.has(choice)) reasonsByTransporter.set(choice, new Map());
               const transporterReasons = reasonsByTransporter.get(choice);
@@ -780,20 +871,14 @@
             });
 
             if (firstChoice && !firstChoiceSelected) {
-              choice1NotSelectedByTransporter.set(
-                firstChoice,
-                (choice1NotSelectedByTransporter.get(firstChoice) || 0) + 1
-              );
-              const rejectReason = safeName(log.raison_1, "Non renseigné");
-              reasonsForChoice1Rejection.set(
-                rejectReason,
-                (reasonsForChoice1Rejection.get(rejectReason) || 0) + 1
-              );
-              if (!choice1ReasonHeatmap.has(firstChoice)) {
-                choice1ReasonHeatmap.set(firstChoice, new Map());
+              choice1NotSelectedByTransporter.set(firstChoice, (choice1NotSelectedByTransporter.get(firstChoice) || 0) + 1);
+              const rejectReason = safeName(log.raison_1, "");
+              if (rejectReason && !isIgnorableReason(rejectReason)) {
+                reasonsForChoice1Rejection.set(
+                  rejectReason,
+                  (reasonsForChoice1Rejection.get(rejectReason) || 0) + 1
+                );
               }
-              const reasonMap = choice1ReasonHeatmap.get(firstChoice);
-              reasonMap.set(rejectReason, (reasonMap.get(rejectReason) || 0) + 1);
             }
           });
 
@@ -808,19 +893,10 @@
             share: totalTransports ? (count / totalTransports) * 100 : 0,
           }));
 
-          const reasonsByTransporterRows = toSortedEntries(reasonsByTransporter, "asc").map(
-            ([transporter, reasonsMap]) => {
-              const reasons = toSortedEntries(reasonsMap).map(([reason, count]) => ({
-                reason,
-                count,
-              }));
-              return {
-                transporter,
-                reasons,
-                total: reasons.reduce((acc, item) => acc + item.count, 0),
-              };
-            }
-          );
+          const reasonsByTransporterRows = toSortedEntries(reasonsByTransporter, "asc").map(([transporter, reasonsMap]) => ({
+            transporter,
+            reasons: toSortedEntries(reasonsMap).map(([reason, count]) => ({ reason, count })),
+          }));
 
           const reasonRows = toSortedEntries(reasonTotals).map(([reason, total]) => ({
             reason,
@@ -830,29 +906,12 @@
             ),
           }));
 
-          const averageLostCost = costEntryCount ? costTotalLost / costEntryCount : 0;
-          const averageLostCostWithoutChoice1 = costCountWhenFirstChoiceNotSelected
-            ? costTotalWhenFirstChoiceNotSelected / costCountWhenFirstChoiceNotSelected
-            : 0;
-
-          const choice1NotSelectedRows = toSortedEntries(choice1NotSelectedByTransporter).map(
-            ([transporter, count]) => ({
-              transporter,
-              count,
-              totalCost: choice1NotSelectedCostByTransporter.get(transporter) || 0,
-              averageCost:
-                count > 0
-                  ? (choice1NotSelectedCostByTransporter.get(transporter) || 0) / count
-                  : 0,
-            })
-          );
-
-          const allReasons = Array.from(
-            new Set([
-              ...reasonRows.map((item) => item.reason),
-              ...Array.from(reasonsForChoice1Rejection.keys()),
-            ])
-          ).sort((a, b) => a.localeCompare(b, "fr", { numeric: true }));
+          const choice1NotSelectedRows = toSortedEntries(choice1NotSelectedByTransporter).map(([transporter, count]) => ({
+            transporter,
+            count,
+            totalCost: choice1NotSelectedCostByTransporter.get(transporter) || 0,
+            averageCost: count > 0 ? (choice1NotSelectedCostByTransporter.get(transporter) || 0) / count : 0,
+          }));
 
           return {
             totalTransports,
@@ -864,18 +923,31 @@
                 ? (firstChoiceRespected / (firstChoiceRespected + firstChoiceNotRespected)) * 100
                 : 0,
             costTotalLost,
-            averageLostCost,
-            averageLostCostWithoutChoice1,
+            averageLostCost: costEntryCount ? costTotalLost / costEntryCount : 0,
+            averageLostCostWithoutChoice1: costCountWhenFirstChoiceNotSelected
+              ? costTotalWhenFirstChoiceNotSelected / costCountWhenFirstChoiceNotSelected
+              : 0,
             costBySelectedTransporter: toSortedEntries(costBySelectedTransporter),
             differenceValues,
             reasonsByTransporterRows,
             reasonRows,
             choice1NotSelectedRows,
             reasonsForChoice1Rejection: toSortedEntries(reasonsForChoice1Rejection),
-            choice1ReasonHeatmap,
-            allReasons,
+            transporterFocus:
+              selectedAnalyticsTransporter === "all"
+                ? null
+                : {
+                    name: selectedAnalyticsTransporter,
+                    firstChoiceCount: transporterFirstChoiceCount,
+                    selectedAsFirstChoiceCount: transporterSelectedAsFirstChoiceCount,
+                    selectedCount: transporterSelectedCount,
+                    lostCostWhenRejected: transporterCostLostWhenFirstChoiceRejected,
+                    topReasons:
+                      reasonsByTransporterRows.find((row) => row.transporter === selectedAnalyticsTransporter)?.reasons || [],
+                  },
+            syntheticCount: logsForAnalytics.syntheticCount,
           };
-        }, [normalizedLogs]);
+        }, [logsForAnalytics, selectedAnalyticsTransporter]);
 
         const formatCurrency = (value) =>
           new Intl.NumberFormat("fr-FR", {
@@ -2261,6 +2333,55 @@
                     </>
                   ) : (
                     <div className="space-y-6">
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                        Jeu d'exemple injecté automatiquement pour lecture des KPI : {analyticsData.syntheticCount} ligne(s) fake.
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="text-sm text-gray-700">
+                          <span className="mb-1 block font-medium">Filtrer sur un transporteur (vue dédiée)</span>
+                          <select
+                            value={selectedAnalyticsTransporter}
+                            onChange={(event) => setSelectedAnalyticsTransporter(event.target.value)}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none"
+                          >
+                            <option value="all">Tous les transporteurs</option>
+                            {analyticsTransporterOptions.map((name) => (
+                              <option key={`analytics-${name}`} value={name}>
+                                {name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      {analyticsData.transporterFocus && (
+                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                          <div className="rounded-xl border border-gray-200 bg-white p-4">
+                            <p className="text-xs uppercase tracking-wide text-gray-500">Nb fois en choix 1</p>
+                            <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.transporterFocus.firstChoiceCount}</p>
+                          </div>
+                          <div className="rounded-xl border border-gray-200 bg-white p-4">
+                            <p className="text-xs uppercase tracking-wide text-gray-500">Pris alors que choix 1</p>
+                            <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.transporterFocus.selectedAsFirstChoiceCount}</p>
+                          </div>
+                          <div className="rounded-xl border border-gray-200 bg-white p-4">
+                            <p className="text-xs uppercase tracking-wide text-gray-500">Nb fois sélectionné</p>
+                            <p className="mt-2 text-2xl font-bold text-gray-800">{analyticsData.transporterFocus.selectedCount}</p>
+                          </div>
+                          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                            <p className="text-xs uppercase tracking-wide text-rose-700">Perte € si choix 1 rejeté</p>
+                            <p className="mt-2 text-2xl font-bold text-rose-700">{formatCurrency(analyticsData.transporterFocus.lostCostWhenRejected)}</p>
+                          </div>
+                          <div className="rounded-xl border border-gray-200 bg-white p-4">
+                            <p className="text-xs uppercase tracking-wide text-gray-500">Top raisons (transporteur)</p>
+                            <p className="mt-2 text-sm font-medium text-gray-700">
+                              {analyticsData.transporterFocus.topReasons.slice(0, 2).map((item) => item.reason).join(" • ") || "—"}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-xl border border-gray-200 bg-white p-4">
                           <p className="text-xs uppercase tracking-wide text-gray-500">Transports total</p>
@@ -2282,7 +2403,7 @@
 
                       <div className="grid gap-6 lg:grid-cols-2">
                         <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Bar chart — Transports par transporteur</h3>
+                          <h3 className="text-sm font-semibold text-gray-700">Transports par transporteur</h3>
                           <div className="mt-4 space-y-2">
                             {analyticsData.selectedCounts.map((item) => {
                               const maxValue = analyticsData.selectedCounts[0]?.count || 1;
@@ -2303,7 +2424,7 @@
                         </div>
 
                         <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Pie chart — Répartition des transporteurs</h3>
+                          <h3 className="text-sm font-semibold text-gray-700">Répartition (%) des transporteurs</h3>
                           <div className="mt-4 space-y-2 text-sm text-gray-700">
                             {analyticsData.selectedCounts.map((item) => (
                               <div key={`share-${item.name}`} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2">
@@ -2317,7 +2438,7 @@
 
                       <div className="grid gap-6 lg:grid-cols-2">
                         <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Analyse des raisons par transporteur (stacked)</h3>
+                          <h3 className="text-sm font-semibold text-gray-700">Raisons de non sélection par transporteur</h3>
                           <div className="mt-4 overflow-x-auto">
                             <table className="min-w-full divide-y divide-gray-200 text-sm">
                               <thead className="bg-gray-50">
@@ -2339,31 +2460,23 @@
                         </div>
 
                         <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Heatmap — Transporteur × raison</h3>
-                          <div className="mt-4 overflow-x-auto">
-                            <table className="min-w-full divide-y divide-gray-200 text-xs">
-                              <thead className="bg-gray-50">
-                                <tr>
-                                  <th className="px-2 py-2 text-left">Transporteur</th>
-                                  {analyticsData.allReasons.slice(0, 6).map((reason) => (
-                                    <th key={`h-reason-${reason}`} className="px-2 py-2 text-left">{reason}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100 bg-white">
-                                {analyticsData.reasonsByTransporterRows.map((row) => {
-                                  const reasonMap = new Map(row.reasons.map((item) => [item.reason, item.count]));
-                                  return (
-                                    <tr key={`heat-${row.transporter}`}>
-                                      <td className="px-2 py-2 font-medium">{row.transporter}</td>
-                                      {analyticsData.allReasons.slice(0, 6).map((reason) => (
-                                        <td key={`${row.transporter}-${reason}`} className="px-2 py-2">{reasonMap.get(reason) || 0}</td>
-                                      ))}
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
+                          <h3 className="text-sm font-semibold text-gray-700">Fréquence des raisons</h3>
+                          <div className="mt-4 space-y-2">
+                            {analyticsData.reasonRows.map((row) => {
+                              const maxValue = analyticsData.reasonRows[0]?.total || 1;
+                              const width = maxValue ? (row.total / maxValue) * 100 : 0;
+                              return (
+                                <div key={`reason-${row.reason}`}>
+                                  <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
+                                    <span>{row.reason}</span>
+                                    <span>{row.total}</span>
+                                  </div>
+                                  <div className="h-2 rounded-full bg-gray-100">
+                                    <div className="h-2 rounded-full bg-cyan-500" style={{ width: `${width}%` }} />
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       </div>
@@ -2380,139 +2493,6 @@
                         <div className="rounded-xl border border-gray-200 bg-white p-4">
                           <p className="text-xs uppercase tracking-wide text-gray-500">Coût moyen si choix 1 rejeté</p>
                           <p className="mt-2 text-2xl font-bold text-gray-800">{formatCurrency(analyticsData.averageLostCostWithoutChoice1)}</p>
-                        </div>
-                      </div>
-
-                      <div className="grid gap-6 lg:grid-cols-2">
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Coût perdu par transporteur sélectionné</h3>
-                          <div className="mt-4 space-y-2">
-                            {analyticsData.costBySelectedTransporter.map(([name, value]) => {
-                              const maxValue = analyticsData.costBySelectedTransporter[0]?.[1] || 1;
-                              const width = maxValue ? (value / maxValue) * 100 : 0;
-                              return (
-                                <div key={`cost-${name}`}>
-                                  <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
-                                    <span>{name}</span>
-                                    <span>{formatCurrency(value)}</span>
-                                  </div>
-                                  <div className="h-2 rounded-full bg-gray-100">
-                                    <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${width}%` }} />
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Histogramme des différences de coût</h3>
-                          <div className="mt-3 grid grid-cols-5 gap-2 text-center text-xs text-gray-600">
-                            {(() => {
-                              const values = analyticsData.differenceValues;
-                              if (!values.length) {
-                                return <p className="col-span-5 py-6 text-gray-500">Aucune donnée de coût.</p>;
-                              }
-                              const min = Math.min(...values);
-                              const max = Math.max(...values);
-                              const bins = 5;
-                              const span = max - min || 1;
-                              const counts = Array.from({ length: bins }, () => 0);
-                              values.forEach((value) => {
-                                const idx = Math.min(bins - 1, Math.floor(((value - min) / span) * bins));
-                                counts[idx] += 1;
-                              });
-                              const maxCount = Math.max(...counts, 1);
-                              return counts.map((count, idx) => {
-                                const height = (count / maxCount) * 100;
-                                return (
-                                  <div key={`bin-${idx}`} className="flex flex-col items-center gap-1">
-                                    <div className="flex h-24 w-full items-end rounded bg-gray-100 p-1">
-                                      <div className="w-full rounded bg-indigo-400" style={{ height: `${height}%` }} />
-                                    </div>
-                                    <span>{count}</span>
-                                  </div>
-                                );
-                              });
-                            })()}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="grid gap-6 lg:grid-cols-2">
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Choix 1 non sélectionné — volume et coût</h3>
-                          <div className="mt-4 overflow-x-auto">
-                            <table className="min-w-full divide-y divide-gray-200 text-sm">
-                              <thead className="bg-gray-50">
-                                <tr>
-                                  <th className="px-3 py-2 text-left">Transporteur (choix 1)</th>
-                                  <th className="px-3 py-2 text-left">Nb cas</th>
-                                  <th className="px-3 py-2 text-left">Coût total</th>
-                                  <th className="px-3 py-2 text-left">Coût moyen</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100 bg-white">
-                                {analyticsData.choice1NotSelectedRows.map((row) => (
-                                  <tr key={`c1-${row.transporter}`}>
-                                    <td className="px-3 py-2 font-medium">{row.transporter}</td>
-                                    <td className="px-3 py-2">{row.count}</td>
-                                    <td className="px-3 py-2">{formatCurrency(row.totalCost)}</td>
-                                    <td className="px-3 py-2">{formatCurrency(row.averageCost)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-
-                        <div className="rounded-xl border border-gray-200 bg-white p-4">
-                          <h3 className="text-sm font-semibold text-gray-700">Raisons du rejet du choix 1</h3>
-                          <div className="mt-4 space-y-2">
-                            {analyticsData.reasonsForChoice1Rejection.map(([reason, count]) => {
-                              const maxValue = analyticsData.reasonsForChoice1Rejection[0]?.[1] || 1;
-                              const width = maxValue ? (count / maxValue) * 100 : 0;
-                              return (
-                                <div key={`rej-${reason}`}>
-                                  <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
-                                    <span>{reason}</span>
-                                    <span>{count}</span>
-                                  </div>
-                                  <div className="h-2 rounded-full bg-gray-100">
-                                    <div className="h-2 rounded-full bg-rose-500" style={{ width: `${width}%` }} />
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border border-gray-200 bg-white p-4">
-                        <h3 className="text-sm font-semibold text-gray-700">Heatmap — choix 1 rejeté : transporteur × raison</h3>
-                        <div className="mt-4 overflow-x-auto">
-                          <table className="min-w-full divide-y divide-gray-200 text-xs">
-                            <thead className="bg-gray-50">
-                              <tr>
-                                <th className="px-2 py-2 text-left">Transporteur</th>
-                                {analyticsData.allReasons.slice(0, 8).map((reason) => (
-                                  <th key={`c1-h-${reason}`} className="px-2 py-2 text-left">{reason}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100 bg-white">
-                              {analyticsData.choice1NotSelectedRows.map((row) => {
-                                const reasonMap = analyticsData.choice1ReasonHeatmap.get(row.transporter) || new Map();
-                                return (
-                                  <tr key={`heat-c1-${row.transporter}`}>
-                                    <td className="px-2 py-2 font-medium">{row.transporter}</td>
-                                    {analyticsData.allReasons.slice(0, 8).map((reason) => (
-                                      <td key={`${row.transporter}-c1-${reason}`} className="px-2 py-2">{reasonMap.get(reason) || 0}</td>
-                                    ))}
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
                         </div>
                       </div>
                     </div>
