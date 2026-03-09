@@ -92,6 +92,8 @@
 
       const PREMIUM_TRANSPORTER_ID = 4;
       const PREMIUM_RATE_MULTIPLIER = 1.04;
+      const SPRIMONT_COORDINATES = { lat: 50.5333, lon: 5.6203 };
+      const ORS_MATRIX_MAX_LOCATIONS = 50;
 
       const sanitizeUsername = (username) => {
         if (!username) return "";
@@ -174,7 +176,11 @@
         const list = selectedDeptIds
           .map((id) => departments.find((d) => d.id === id))
           .filter(Boolean)
-          .sort((a, b) => a.km - b.km);
+          .sort((a, b) => {
+            const kmA = Number.isFinite(Number(a.km)) ? Number(a.km) : Number.POSITIVE_INFINITY;
+            const kmB = Number.isFinite(Number(b.km)) ? Number(b.km) : Number.POSITIVE_INFINITY;
+            return kmA - kmB;
+          });
         return list;
       }
 
@@ -2443,6 +2449,88 @@
           fetchLogs();
         }, [userIdentifier, fetchLogs]);
 
+        const departmentDistanceCacheRef = useRef(new Map());
+
+        const enrichDepartmentsWithRealDistances = useCallback(
+          async (deptList) => {
+            const cache = departmentDistanceCacheRef.current;
+
+            const departmentsWithCoordinates = deptList.filter(
+              (dept) =>
+                Number.isFinite(dept?.latitude) &&
+                Number.isFinite(dept?.longitude)
+            );
+
+            const missingDistanceDepartments = departmentsWithCoordinates.filter(
+              (dept) => !cache.has(dept.id)
+            );
+
+            const chunkSize = ORS_MATRIX_MAX_LOCATIONS - 1;
+
+            for (let start = 0; start < missingDistanceDepartments.length; start += chunkSize) {
+              const chunk = missingDistanceDepartments.slice(start, start + chunkSize);
+              if (!chunk.length) {
+                continue;
+              }
+
+              const locations = [
+                [SPRIMONT_COORDINATES.lon, SPRIMONT_COORDINATES.lat],
+                ...chunk.map((dept) => [Number(dept.longitude), Number(dept.latitude)]),
+              ];
+
+              const response = await fetch(
+                "https://api.openrouteservice.org/v2/matrix/driving-hgv",
+                {
+                  method: "POST",
+                  headers: {
+                    Authorization: OPENROUTESERVICE_API_KEY,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    locations,
+                    metrics: ["distance"],
+                    units: "km",
+                  }),
+                }
+              );
+
+              if (!response.ok) {
+                throw new Error(
+                  "Impossible de récupérer les distances réelles par département."
+                );
+              }
+
+              const data = await response.json();
+              const distances = data?.distances;
+
+              if (!Array.isArray(distances) || !Array.isArray(distances[0])) {
+                throw new Error(
+                  "Réponse OpenRouteService invalide lors du calcul des kilomètres par département."
+                );
+              }
+
+              chunk.forEach((dept, index) => {
+                const distanceFromBase = distances?.[0]?.[index + 1];
+                if (Number.isFinite(distanceFromBase)) {
+                  cache.set(dept.id, Number(distanceFromBase));
+                }
+              });
+            }
+
+            return deptList.map((dept) => {
+              const cachedDistance = cache.get(dept.id);
+              if (Number.isFinite(cachedDistance)) {
+                return {
+                  ...dept,
+                  km: Number(cachedDistance.toFixed(1)),
+                };
+              }
+              return dept;
+            });
+          },
+          []
+        );
+
         useEffect(() => {
           if (!session) {
             setAdminPanelActive(false);
@@ -2659,9 +2747,21 @@
                 });
               });
 
+              let departmentsWithRealDistance = deptList;
+              try {
+                departmentsWithRealDistance = await enrichDepartmentsWithRealDistances(
+                  deptList
+                );
+              } catch (distanceError) {
+                console.warn(
+                  "⚠️ Distances ORS indisponibles, utilisation des kilomètres existants :",
+                  distanceError
+                );
+              }
+
               if (!isActive) return;
 
-              setDepartments(deptList);
+              setDepartments(departmentsWithRealDistance);
               setTransporters(Array.from(transportersMap.values()));
             } catch (err) {
               console.error("❌ Erreur Supabase :", err);
@@ -2676,7 +2776,7 @@
           return () => {
             isActive = false;
           };
-        }, [session, dataReloadFlag]);
+        }, [enrichDepartmentsWithRealDistances, session, dataReloadFlag]);
 
         /********************************************
          *  CALCUL DU MEILLEUR TRANSPORTEUR
@@ -2720,7 +2820,6 @@
         }, [departmentSearch, departments]);
 
         const routeDistanceCacheRef = useRef(new Map());
-
         useEffect(() => {
           let isActive = true;
 
@@ -2737,7 +2836,6 @@
             }
 
 
-            const baseCoords = { lat: 50.5333, lon: 5.6203 };
             const deptCoords = activeRoute.map((dept) => {
               if (
                 Number.isFinite(dept?.latitude) &&
@@ -2760,7 +2858,7 @@
               return;
             }
 
-            const coordsList = [baseCoords, ...deptCoords];
+            const coordsList = [SPRIMONT_COORDINATES, ...deptCoords];
 
             setRouteMetrics((prev) => ({ ...prev, loading: true, error: "" }));
             const cache = routeDistanceCacheRef.current;
@@ -2932,6 +3030,8 @@
             const details = [];
             let hasMissingTariff = false;
 
+            const furthestDept = activeRoute[activeRoute.length - 1] || null;
+
             for (let idx = 0; idx < activeRoute.length; idx += 1) {
               const dept = activeRoute[idx];
               const rate = transporter.rates.find((r) => r.deptId === dept.id);
@@ -2952,7 +3052,7 @@
                 `${idx + 1}. ${dept.name} (${dept.km} km): ${selectedRate.value.toFixed(2)}€ (${selectedRate.label})`
               );
 
-              if (furthestCost === null || selectedRate.value >= furthestCost) {
+              if (furthestDept && dept.id === furthestDept.id) {
                 furthestCost = selectedRate.value;
                 furthestDeptDetail = `${dept.name} (${dept.km} km)`;
               }
