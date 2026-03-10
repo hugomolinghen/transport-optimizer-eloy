@@ -676,7 +676,7 @@
         }, [normalizedLogs]);
 
         const logColumns = useMemo(() => {
-          const excludedKeys = new Set(["searchDate", "normalizedResult", "normalizedUser", "id"]);
+          const excludedKeys = new Set(["searchDate", "normalizedResult", "normalizedUser", "id", "identifiant"]);
           const preferredOrder = [
             "date_recherche",
             "created_at",
