@@ -80,24 +80,19 @@
         lucide.Trash2 || lucide.Trash || createFallbackIcon("🗑️");
       const MailIcon = lucide.Mail || createFallbackIcon("✉️");
 
+      const ELOY_LOGO_URL =
+        "https://upload.wikimedia.org/wikipedia/commons/b/b6/Eloy_%28entreprise%29.jpg";
+
       function EloyLogo({ compact = false }) {
         return (
           <div className={`flex items-center ${compact ? "gap-2" : "gap-3"}`}>
-            <svg
-              width={compact ? "42" : "56"}
-              height={compact ? "42" : "56"}
-              viewBox="0 0 100 100"
-              aria-hidden="true"
-              className="shrink-0"
-            >
-              <path d="M20 20 A44 44 0 1 1 20 80" fill="none" stroke="#0E7CB5" strokeWidth="10" strokeLinecap="round" />
-            </svg>
-            <div className="leading-none">
-              <p className={`${compact ? "text-xl" : "text-2xl"} font-extrabold text-zinc-700 tracking-tight`}>
-                eloy water
-              </p>
-              <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-400 mt-1" />
-            </div>
+            <img
+              src={ELOY_LOGO_URL}
+              alt="Logo Eloy"
+              className={`shrink-0 object-contain ${
+                compact ? "h-10 w-10" : "h-14 w-14"
+              }`}
+            />
           </div>
         );
       }
