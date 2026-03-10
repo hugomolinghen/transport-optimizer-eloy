@@ -25,7 +25,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   </head>
 
-  <body class="bg-gradient-to-br from-blue-50 to-indigo-50 min-h-screen">
+  <body class="bg-gradient-to-br from-sky-50 to-cyan-50 min-h-screen">
     <div id="root"></div>
 
     <script type="text/babel">
@@ -79,6 +79,23 @@
       const TrashIcon =
         lucide.Trash2 || lucide.Trash || createFallbackIcon("🗑️");
       const MailIcon = lucide.Mail || createFallbackIcon("✉️");
+
+      const ELOY_LOGO_URL =
+        "https://upload.wikimedia.org/wikipedia/commons/b/b6/Eloy_%28entreprise%29.jpg";
+
+      function EloyLogo({ compact = false, login = false }) {
+        return (
+          <div className="flex items-center justify-center">
+            <img
+              src={ELOY_LOGO_URL}
+              alt="Logo Eloy"
+              className={`shrink-0 object-contain ${
+                compact ? "h-14 w-14" : login ? "h-24 w-24" : "h-28 w-28"
+              }`}
+            />
+          </div>
+        );
+      }
 
       const ADMIN_EMAILS = ["admin@users.eloy"];
       const NON_SELECTION_REASONS = [
@@ -659,7 +676,7 @@
         }, [normalizedLogs]);
 
         const logColumns = useMemo(() => {
-          const excludedKeys = new Set(["searchDate", "normalizedResult", "normalizedUser", "id"]);
+          const excludedKeys = new Set(["searchDate", "normalizedResult", "normalizedUser", "id", "identifiant"]);
           const preferredOrder = [
             "date_recherche",
             "created_at",
@@ -1704,7 +1721,7 @@
                           {group.departments.length > 1 ? "s" : ""}
                         </p>
                       </div>
-                      <span className="text-sm text-indigo-600 font-medium">
+                      <span className="text-sm text-sky-600 font-medium">
                         {isExpanded ? "Masquer" : "Afficher"}
                       </span>
                     </button>
@@ -1749,7 +1766,7 @@
                                         event.target.value
                                       )
                                     }
-                                    className="w-28 border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                    className="w-28 border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                                   />
                                 </td>
                                 <td className="px-4 py-2">
@@ -1763,7 +1780,7 @@
                                         event.target.value
                                       )
                                     }
-                                    className="w-28 border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                    className="w-28 border border-gray-200 rounded px-2 py-1 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                                   />
                                 </td>
                               </tr>
@@ -1828,7 +1845,7 @@
                               event.target.value
                             )
                           }
-                          className="w-full border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          className="w-full border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                           placeholder="Nom du transporteur"
                         />
                       </td>
@@ -1844,7 +1861,7 @@
                                 event.target.checked
                               )
                             }
-                            className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
+                            className="h-4 w-4 text-sky-600 border-gray-300 rounded"
                           />
                           Oui
                         </label>
@@ -1861,7 +1878,7 @@
                             )
                           }
                           disabled={!row.hasBreakOfCharge}
-                          className={`w-32 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                          className={`w-32 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 ${
                             row.hasBreakOfCharge
                               ? "bg-white"
                               : "bg-gray-100 text-gray-400"
@@ -1880,7 +1897,7 @@
                               event.target.value
                             )
                           }
-                          className="w-28 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          className="w-28 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                           placeholder="0"
                         />
                       </td>
@@ -1895,7 +1912,7 @@
                               event.target.value
                             )
                           }
-                          className="w-28 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          className="w-28 border border-gray-200 rounded px-3 py-1 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                           placeholder="0"
                         />
                       </td>
@@ -1925,11 +1942,11 @@
         };
 
         return (
-          <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 p-6">
+          <div className="min-h-screen bg-gradient-to-br from-sky-50 to-cyan-50 p-6">
             <div className="max-w-7xl mx-auto space-y-6">
               <div className="bg-white rounded-xl shadow-lg p-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div className="flex items-center gap-3">
-                  <SettingsIcon className="text-indigo-600" size={32} />
+                  <SettingsIcon className="text-sky-600" size={32} />
                   <div>
                     <h1 className="text-3xl font-bold text-gray-800">
                       Administration des tarifs
@@ -1942,14 +1959,14 @@
                 <div className="flex flex-wrap justify-end gap-3">
                   <button
                     onClick={() => loadAdminData()}
-                    className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+                    className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-white px-4 py-2 text-sm font-medium text-sky-600 hover:bg-sky-50 disabled:opacity-50"
                     disabled={adminLoading}
                   >
                     <RefreshIcon size={16} /> Actualiser
                   </button>
                   <button
                     onClick={onExit}
-                    className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                    className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700"
                   >
                     <RouteIcon size={16} /> Aller à l'outil
                   </button>
@@ -1980,8 +1997,8 @@
                     onClick={() => setActiveTab("tarifs")}
                     className={`flex-1 px-4 py-3 text-sm font-medium ${
                       activeTab === "tarifs"
-                        ? "text-indigo-600 border-b-2 border-indigo-600"
-                        : "text-gray-500 hover:text-indigo-600"
+                        ? "text-sky-600 border-b-2 border-sky-600"
+                        : "text-gray-500 hover:text-sky-600"
                     }`}
                   >
                     Tarifs
@@ -1990,8 +2007,8 @@
                     onClick={() => setActiveTab("transporteurs")}
                     className={`flex-1 px-4 py-3 text-sm font-medium ${
                       activeTab === "transporteurs"
-                        ? "text-indigo-600 border-b-2 border-indigo-600"
-                        : "text-gray-500 hover:text-indigo-600"
+                        ? "text-sky-600 border-b-2 border-sky-600"
+                        : "text-gray-500 hover:text-sky-600"
                     }`}
                   >
                     Transporteurs
@@ -2000,8 +2017,8 @@
                     onClick={() => setActiveTab("data")}
                     className={`flex-1 px-4 py-3 text-sm font-medium ${
                       activeTab === "data"
-                        ? "text-indigo-600 border-b-2 border-indigo-600"
-                        : "text-gray-500 hover:text-indigo-600"
+                        ? "text-sky-600 border-b-2 border-sky-600"
+                        : "text-gray-500 hover:text-sky-600"
                     }`}
                   >
                     Data
@@ -2010,8 +2027,8 @@
                     onClick={() => setActiveTab("rapport")}
                     className={`flex-1 px-4 py-3 text-sm font-medium ${
                       activeTab === "rapport"
-                        ? "text-indigo-600 border-b-2 border-indigo-600"
-                        : "text-gray-500 hover:text-indigo-600"
+                        ? "text-sky-600 border-b-2 border-sky-600"
+                        : "text-gray-500 hover:text-sky-600"
                     }`}
                   >
                     Rapport
@@ -2034,20 +2051,20 @@
                         <div className="flex flex-wrap gap-3">
                           <button
                             onClick={handleCsvButtonClick}
-                            className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+                            className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-white px-4 py-2 text-sm font-medium text-sky-600 hover:bg-sky-50 disabled:opacity-50"
                             disabled={isImporting}
                           >
                             <UploadIcon size={16} /> Import CSV
                           </button>
                           <button
                             onClick={handleOpenExportPanel}
-                            className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50"
+                            className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-white px-4 py-2 text-sm font-medium text-sky-600 hover:bg-sky-50"
                           >
                             <DownloadIcon size={16} /> Export CSV
                           </button>
                           <button
                             onClick={handleSaveTariffs}
-                            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                            className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
                             disabled={isSavingTariffs}
                           >
                             <SaveIcon size={16} /> Sauvegarder
@@ -2060,9 +2077,9 @@
                         departement_code, prix_bache, prix_plateau.
                       </p>
                       {isExportPanelOpen && (
-                        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 space-y-3">
+                        <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 space-y-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-sm font-semibold text-indigo-800">
+                            <p className="text-sm font-semibold text-sky-800">
                               Sélectionner les transporteurs à exporter
                             </p>
                             <div className="flex flex-wrap gap-2">
@@ -2073,14 +2090,14 @@
                                     groupedTariffs.map((group) => group.transporterId)
                                   )
                                 }
-                                className="text-xs rounded border border-indigo-300 px-2 py-1 text-indigo-700 hover:bg-indigo-100"
+                                className="text-xs rounded border border-sky-300 px-2 py-1 text-sky-700 hover:bg-sky-100"
                               >
                                 Tout sélectionner
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setSelectedExportTransporters([])}
-                                className="text-xs rounded border border-indigo-300 px-2 py-1 text-indigo-700 hover:bg-indigo-100"
+                                className="text-xs rounded border border-sky-300 px-2 py-1 text-sky-700 hover:bg-sky-100"
                               >
                                 Tout désélectionner
                               </button>
@@ -2114,7 +2131,7 @@
                             <button
                               type="button"
                               onClick={handleExportTariffsCsv}
-                              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                              className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700"
                             >
                               <DownloadIcon size={14} /> Télécharger le CSV
                             </button>
@@ -2132,13 +2149,13 @@
                         <div className="flex flex-wrap gap-3">
                           <button
                             onClick={handleAddTransporter}
-                            className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50"
+                            className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-white px-4 py-2 text-sm font-medium text-sky-600 hover:bg-sky-50"
                           >
-                            <UsersIcon size={16} /> Ajouter un transporteur
+                            <TruckIcon size={16} /> Ajouter un transporteur
                           </button>
                           <button
                             onClick={handleSaveTransporters}
-                            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                            className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
                             disabled={isSavingTransporters}
                           >
                             <SaveIcon size={16} /> Sauvegarder
@@ -2168,7 +2185,7 @@
                           <select
                             value={selectedLogResult}
                             onChange={(event) => setSelectedLogResult(event.target.value)}
-                            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none"
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-sky-500 focus:outline-none"
                           >
                             <option value="all">Tous les transporteurs</option>
                             {logResultOptions.map((option) => (
@@ -2183,7 +2200,7 @@
                           <select
                             value={selectedLogUser}
                             onChange={(event) => setSelectedLogUser(event.target.value)}
-                            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none"
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-sky-500 focus:outline-none"
                           >
                             <option value="all">Tous les utilisateurs</option>
                             {logUserOptions.map((option) => (
@@ -2242,7 +2259,7 @@
                           <select
                             value={selectedAnalyticsTransporter}
                             onChange={(event) => setSelectedAnalyticsTransporter(event.target.value)}
-                            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-indigo-500 focus:outline-none"
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-sky-500 focus:outline-none"
                           >
                             <option value="all">Sélectionnez un transporteur</option>
                             {analyticsTransporterOptions.map((name) => (
@@ -2300,7 +2317,7 @@
                                         <span>{item.count}</span>
                                       </div>
                                       <div className="h-2 rounded-full bg-gray-100">
-                                        <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${width}%` }} />
+                                        <div className="h-2 rounded-full bg-sky-500" style={{ width: `${width}%` }} />
                                       </div>
                                     </div>
                                   );
@@ -2365,7 +2382,7 @@
                                           <span>{item.count}</span>
                                         </div>
                                         <div className="h-2 rounded-full bg-gray-100">
-                                          <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${width}%` }} />
+                                          <div className="h-2 rounded-full bg-sky-500" style={{ width: `${width}%` }} />
                                         </div>
                                       </div>
                                     );
@@ -3936,6 +3953,7 @@
               return;
             }
 
+
             const payload = {
               identifiant: userIdentifier,
               utilisateur: userDisplayName,
@@ -3944,12 +3962,6 @@
               attributs:
                 activeSearch.attributesLabel ||
                 buildAttributesLabel(activeSearch.truckType),
-              transport_premium: Boolean(activeSearch.isPremium),
-              date_chargement: activeSearch.loadingDate || null,
-              date_livraison: activeSearch.deliveryDate || null,
-              horaire_livraison: activeSearch.isPremium
-                ? JSON.stringify(activeSearch.deliveryScheduleByStop || {})
-                : activeSearch.deliveryTime || null,
               resultat: selectedChoice.transporter.name,
               choix_1: rankedChoices[0]
                 ? rankedChoices[0].transporter.name
@@ -4132,25 +4144,30 @@
         if (authLoading)
           return (
             <div className="flex items-center justify-center h-screen text-gray-600">
-              <p>Vérification de la session Supabase...</p>
+              <p>Vérification de la session...</p>
             </div>
           );
 
         if (!session)
           return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 p-6">
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 to-cyan-50 p-6">
               <div className="bg-white shadow-xl rounded-2xl p-8 w-full max-w-md space-y-6">
-                <div className="flex items-center gap-3">
-                  <UnlockIcon className="text-indigo-600" size={32} />
-                  <div>
-                    <h1 className="text-2xl font-bold text-gray-800">
-                      {isRegistering ? "Créer un compte" : "Connexion Supabase"}
-                    </h1>
-                    <p className="text-sm text-gray-500">
-                      {isRegistering
-                        ? "Choisissez un nom d'utilisateur (utilisé pour la connexion) et un mot de passe."
-                        : "Connectez-vous avec votre nom d'utilisateur et votre mot de passe pour accéder aux données transporteurs."}
-                    </p>
+                <div className="space-y-3">
+                  <div className="flex justify-center">
+                    <EloyLogo login={true} />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <UnlockIcon className="text-sky-600" size={32} />
+                    <div>
+                      <h1 className="text-2xl font-bold text-gray-800">
+                        {isRegistering ? "Créer un compte" : "Connexion"}
+                      </h1>
+                      <p className="text-sm text-gray-500">
+                        {isRegistering
+                          ? "Choisissez un nom d'utilisateur (utilisé pour la connexion) et un mot de passe."
+                          : "Connectez-vous avec votre nom d'utilisateur et votre mot de passe pour accéder aux données transporteurs."}
+                      </p>
+                    </div>
                   </div>
                 </div>
 
@@ -4175,7 +4192,7 @@
                           type="text"
                           value={registerUsername}
                           onChange={(e) => setRegisterUsername(e.target.value)}
-                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-sky-500"
                           placeholder="Votre identifiant"
                           required
                         />
@@ -4189,7 +4206,7 @@
                             type={isRegisterPasswordVisible ? "text" : "password"}
                             value={registerPassword}
                             onChange={(e) => setRegisterPassword(e.target.value)}
-                            className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500 pr-12"
+                            className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-sky-500 pr-12"
                             placeholder="••••••••"
                             required
                           />
@@ -4198,7 +4215,7 @@
                             onClick={() =>
                               setIsRegisterPasswordVisible((visible) => !visible)
                             }
-                            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-sky-600 hover:text-sky-800"
                             aria-label={
                               isRegisterPasswordVisible
                                 ? "Masquer le mot de passe"
@@ -4211,7 +4228,7 @@
                       </div>
                       <button
                         type="submit"
-                        className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+                        className="w-full bg-sky-600 text-white py-2 rounded hover:bg-sky-700 disabled:opacity-50"
                         disabled={isCreatingAccount}
                       >
                         {isCreatingAccount ? "Création en cours..." : "Créer le compte"}
@@ -4221,7 +4238,7 @@
                       Déjà un compte ?
                       <button
                         type="button"
-                        className="text-indigo-600 font-medium ml-1"
+                        className="text-sky-600 font-medium ml-1"
                         onClick={() => {
                           setIsRegistering(false);
                           setRegisterError("");
@@ -4250,7 +4267,7 @@
                           type="text"
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
-                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                          className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-sky-500"
                           placeholder="Votre nom d'utilisateur"
                           required
                         />
@@ -4264,7 +4281,7 @@
                             type={isLoginPasswordVisible ? "text" : "password"}
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500 pr-12"
+                            className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-sky-500 pr-12"
                             placeholder="••••••••"
                             required
                           />
@@ -4273,7 +4290,7 @@
                             onClick={() =>
                               setIsLoginPasswordVisible((visible) => !visible)
                             }
-                            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                            className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-sky-600 hover:text-sky-800"
                             aria-label={
                               isLoginPasswordVisible
                                 ? "Masquer le mot de passe"
@@ -4286,7 +4303,7 @@
                       </div>
                       <button
                         type="submit"
-                        className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
+                        className="w-full bg-sky-600 text-white py-2 rounded hover:bg-sky-700 disabled:opacity-50"
                         disabled={!email || !password}
                       >
                         Se connecter
@@ -4299,7 +4316,7 @@
                       Pas encore de compte ?
                       <button
                         type="button"
-                        className="text-indigo-600 font-medium ml-1"
+                        className="text-sky-600 font-medium ml-1"
                         onClick={() => {
                           setIsRegistering(true);
                           setAuthError("");
@@ -4347,12 +4364,16 @@
             <div className="max-w-7xl mx-auto p-6">
             {/* ======= HEADER ======= */}
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8 flex items-center justify-between gap-6">
-              <div className="flex items-center gap-3">
-                <TruckIcon className="text-indigo-600" size={32} />
-                <div>
-                  <h1 className="text-3xl font-bold text-gray-800">
-                    Optimiseur de Transporteur
-                  </h1>
+              <div className="flex items-center gap-4">
+                <EloyLogo compact={true} />
+                <div className="h-8 w-px bg-gray-200" aria-hidden="true" />
+                <div className="flex items-center gap-3">
+                  <TruckIcon className="text-sky-600" size={32} />
+                  <div>
+                    <h1 className="text-3xl font-bold text-gray-800">
+                      Optimiseur de Transporteur
+                    </h1>
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-4">
@@ -4360,7 +4381,7 @@
                 {isAdmin && (
                   <button
                     onClick={() => setAdminPanelActive(true)}
-                    className="flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800"
+                    className="flex items-center gap-2 text-sm text-sky-600 hover:text-sky-800"
                   >
                     <SettingsIcon size={18} /> Mode admin
                   </button>
@@ -4392,7 +4413,7 @@
                   onChange={(e) =>
                     setBordereau(e.target.value.trim().toUpperCase())
                   }
-                  className="w-full border px-3 py-2 rounded mb-3 focus:ring-2 focus:ring-indigo-500"
+                  className="w-full border px-3 py-2 rounded mb-3 focus:ring-2 focus:ring-sky-500"
                 />
                 {bordereau && !isOrderNumberValid && (
                   <p className="text-xs text-red-600 -mt-2 mb-3">
@@ -4407,7 +4428,7 @@
                     type="checkbox"
                     checked={isPremium}
                     onChange={(event) => setIsPremium(event.target.checked)}
-                    className="h-4 w-4 text-indigo-600"
+                    className="h-4 w-4 text-sky-600"
                   />
                   <label
                     htmlFor="premium-toggle"
@@ -4427,7 +4448,7 @@
                       type="date"
                       value={loadingDate}
                       onChange={(event) => setLoadingDate(event.target.value)}
-                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-sky-500"
                     />
                   </div>
                   <div>
@@ -4438,7 +4459,7 @@
                       type="date"
                       value={deliveryDate}
                       onChange={(event) => setDeliveryDate(event.target.value)}
-                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-sky-500"
                     />
                   </div>
                 </div>
@@ -4456,7 +4477,7 @@
                     <select
                       value={deliveryTime || "matin"}
                       onChange={(event) => setDeliveryTime(event.target.value)}
-                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-indigo-500"
+                      className="w-full border px-3 py-2 rounded focus:ring-2 focus:ring-sky-500"
                     >
                       <option value="matin">Matin</option>
                       <option value="soir">Soir</option>
@@ -4472,7 +4493,7 @@
                   Type de camion <span className="text-red-600">*</span>
                 </label>
                 <div className="flex gap-3 mb-4">
-                  <label className={`px-3 py-2 border rounded cursor-pointer ${truckType === "non-specifie" ? "bg-indigo-50 border-indigo-400" : ""}`}>
+                  <label className={`px-3 py-2 border rounded cursor-pointer ${truckType === "non-specifie" ? "bg-sky-50 border-sky-400" : ""}`}>
                     <input
                       type="radio"
                       name="truck"
@@ -4483,7 +4504,7 @@
                     />
                     Non spécifié (choix auto)
                   </label>
-                  <label className={`px-3 py-2 border rounded cursor-pointer ${truckType === "bache" ? "bg-indigo-50 border-indigo-400" : ""}`}>
+                  <label className={`px-3 py-2 border rounded cursor-pointer ${truckType === "bache" ? "bg-sky-50 border-sky-400" : ""}`}>
                     <input
                       type="radio"
                       name="truck"
@@ -4494,7 +4515,7 @@
                     />
                     Baché
                   </label>
-                  <label className={`px-3 py-2 border rounded cursor-pointer ${truckType === "plateau" ? "bg-indigo-50 border-indigo-400" : ""}`}>
+                  <label className={`px-3 py-2 border rounded cursor-pointer ${truckType === "plateau" ? "bg-sky-50 border-sky-400" : ""}`}>
                     <input
                       type="radio"
                       name="truck"
@@ -4509,7 +4530,7 @@
 
                 <button
                   onClick={handleSearch}
-                  className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-60"
+                  className="w-full bg-sky-600 text-white py-2 rounded hover:bg-sky-700 flex items-center justify-center gap-2 disabled:opacity-60"
                   disabled=
                     {!isOrderNumberValid ||
                       !isLoadingDateValid ||
@@ -4540,7 +4561,7 @@
                       setSelectedDepts([]);
                       setDeliveryScheduleByStop({});
                     }}
-                    className="text-sm text-indigo-600 hover:text-indigo-800"
+                    className="text-sm text-sky-600 hover:text-sky-800"
                   >
                     Tout décocher
                   </button>
@@ -4557,7 +4578,7 @@
                     onChange={(event) => setDepartmentSearch(event.target.value)}
                     onKeyDown={handleDepartmentSearchKeyDown}
                     placeholder="Rechercher un département (ex: 75)"
-                    className="w-full border border-gray-300 rounded-lg py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                    className="w-full border border-gray-300 rounded-lg py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400"
                     autoComplete="off"
                   />
                 </div>
@@ -4575,7 +4596,7 @@
                       return (
                         <div
                           key={dept.id}
-                          className={`flex items-center justify-between bg-gray-50 p-2 rounded hover:bg-gray-100 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-400 ${isSelected ? "ring-2 ring-indigo-400" : ""}`}
+                          className={`flex items-center justify-between bg-gray-50 p-2 rounded hover:bg-gray-100 cursor-pointer focus:outline-none focus:ring-2 focus:ring-sky-400 ${isSelected ? "ring-2 ring-sky-400" : ""}`}
                           role="button"
                           tabIndex={0}
                           onClick={() => toggleDepartmentSelection(dept.id)}
@@ -4592,14 +4613,14 @@
                               checked={isSelected}
                               onClick={(event) => event.stopPropagation()}
                               onChange={() => toggleDepartmentSelection(dept.id)}
-                              className="text-indigo-600"
+                              className="text-sky-600"
                             />
-                            <span className="font-mono text-sm bg-indigo-100 px-2 py-1 rounded font-semibold">
+                            <span className="font-mono text-sm bg-sky-100 px-2 py-1 rounded font-semibold">
                               {dept.code}
                             </span>
                             <span>{dept.name}</span>
                             {selectedCount > 1 && (
-                              <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                              <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-semibold text-sky-700">
                                 x{selectedCount}
                               </span>
                             )}
@@ -4608,7 +4629,7 @@
                             <span className="text-sm text-gray-500">{dept.km} km</span>
                             <button
                               type="button"
-                              className="rounded bg-indigo-100 px-2 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-200 disabled:opacity-50"
+                              className="rounded bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-200 disabled:opacity-50"
                               disabled={!isSelected || selectedCount >= 2}
                               onClick={(event) => {
                                 event.stopPropagation();
@@ -4630,14 +4651,14 @@
             <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div className="flex items-center gap-3">
-                  <RouteIcon className="text-indigo-600" size={28} />
+                  <RouteIcon className="text-sky-600" size={28} />
                   <h2 className="text-xl font-bold text-gray-800">Trajet</h2>
                 </div>
                 {activeRoute.length === 2 && (
                   <button
                     type="button"
                     onClick={() => setIsRouteReversed((prev) => !prev)}
-                    className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800"
+                    className="inline-flex items-center gap-2 text-sm text-sky-600 hover:text-sky-800"
                   >
                     <ArrowUpDownIcon size={16} />
                     Inverser l'ordre
@@ -4660,7 +4681,7 @@
                   </li>
                   {activeRoute.map((dept, index) => (
                     <li key={`${dept.id}-${index}`} className="flex items-start gap-2">
-                      <span className="inline-flex items-center justify-center w-6 h-6 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
+                      <span className="inline-flex items-center justify-center w-6 h-6 bg-sky-100 text-sky-700 rounded-full text-xs font-semibold">
                         {index + 1}
                       </span>
                       <div>
@@ -4675,8 +4696,8 @@
               )}
 
               {isPremium && routeStops.length > 0 && (
-                <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 p-4">
-                  <h3 className="mb-2 text-sm font-semibold text-indigo-800">
+                <div className="mt-4 rounded-lg border border-sky-100 bg-sky-50 p-4">
+                  <h3 className="mb-2 text-sm font-semibold text-sky-800">
                     Horaires de livraison par arrêt <span className="text-red-600">*</span>
                   </h3>
                   <div className="space-y-2">
@@ -4700,7 +4721,7 @@
                                 [stop.key]: newHour ? `${newHour}:${stopMinute || "00"}` : "",
                               }));
                             }}
-                            className="w-full rounded border px-3 py-2 focus:ring-2 focus:ring-indigo-500"
+                            className="w-full rounded border px-3 py-2 focus:ring-2 focus:ring-sky-500"
                           >
                             <option value="" disabled>
                               Heure (00-23)
@@ -4720,7 +4741,7 @@
                                 [stop.key]: stopHour ? `${stopHour}:${newMinute}` : "",
                               }));
                             }}
-                            className="w-full rounded border px-3 py-2 focus:ring-2 focus:ring-indigo-500"
+                            className="w-full rounded border px-3 py-2 focus:ring-2 focus:ring-sky-500"
                           >
                             {premiumMinutes.map((minuteOption) => (
                               <option key={`${stop.key}-m-${minuteOption}`} value={minuteOption}>
@@ -4741,7 +4762,7 @@
               )}
 
               {routeMetrics.loading && (
-                <p className="mt-3 text-sm text-indigo-600">
+                <p className="mt-3 text-sm text-sky-600">
                   Calcul du détour en cours via OpenRouteService...
                 </p>
               )}
@@ -4767,7 +4788,7 @@
                 <h2 className="text-xl font-bold text-gray-800">Tarif transporteur</h2>
                 <button
                   onClick={() => setShowTransporters((prev) => !prev)}
-                  className="text-sm text-indigo-600 hover:text-indigo-800"
+                  className="text-sm text-sky-600 hover:text-sky-800"
                 >
                   {showTransporters ? "Voir moins" : "Voir plus"}
                 </button>
@@ -4872,7 +4893,7 @@
                 )}
 
                 {copyEmailMessage && (
-                  <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+                  <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
                     {copyEmailMessage}
                   </div>
                 )}
@@ -4888,7 +4909,7 @@
                       key={resultKey}
                       className={`p-6 rounded-lg border-2 mb-4 transition-colors ${
                         isSelected
-                          ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200"
+                          ? "border-sky-500 bg-sky-50 ring-2 ring-sky-200"
                           : index === 0
                           ? "bg-green-50 border-green-500"
                           : "bg-gray-50 border-gray-200"
@@ -4904,7 +4925,7 @@
                                 </span>
                               )}
                               {isSelected && (
-                                <span className="bg-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-full">
+                                <span className="bg-sky-500 text-white text-xs font-bold px-3 py-1 rounded-full">
                                   ✅ SÉLECTIONNÉ
                                 </span>
                               )}
@@ -4913,14 +4934,14 @@
                               </h3>
                             </div>
                             <div className="flex flex-col items-end gap-2 text-right">
-                              <div className="text-3xl font-bold text-indigo-600">
+                              <div className="text-3xl font-bold text-sky-600">
                                 {result.totalCost.toFixed(2)}€
                               </div>
                               <div className="text-sm text-gray-500">Coût total</div>
                               <button
                                 type="button"
                                 onClick={() => handleCopyEmail(result.transporter.name)}
-                                className="inline-flex items-center gap-2 rounded-md border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
+                                className="inline-flex items-center gap-2 rounded-md border border-sky-200 px-3 py-2 text-xs font-semibold text-sky-700 transition hover:bg-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-1"
                               >
                                 <MailIcon size={16} />
                                 Copier l'email
@@ -4937,7 +4958,7 @@
                           <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
                             <input
                               type="checkbox"
-                              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                              className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
                               checked={isSelected}
                               onChange={() => handleResultSelection(index)}
                               disabled={activeSearch?.validated}
@@ -4950,7 +4971,7 @@
                           <select
                             value={reasonValue}
                             onChange={(e) => handleReasonChange(index, e.target.value)}
-                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400"
                             disabled={activeSearch?.validated}
                           >
                             <option value="">Sélectionner une raison</option>
@@ -5007,8 +5028,8 @@
                           onClick={() => setHistoryFilter(value)}
                           className={`text-xs rounded-full border px-3 py-1 transition-colors ${
                             isActive
-                              ? "bg-indigo-600 text-white border-indigo-600"
-                              : "bg-white text-gray-600 border-gray-200 hover:border-indigo-300 hover:text-indigo-700"
+                              ? "bg-sky-600 text-white border-sky-600"
+                              : "bg-white text-gray-600 border-gray-200 hover:border-sky-300 hover:text-sky-700"
                           }`}
                         >
                           {label}
@@ -5027,7 +5048,7 @@
                     value={logSearch}
                     onChange={(e) => setLogSearch(e.target.value)}
                     placeholder="Rechercher par numéro Dynamics"
-                    className="w-full border border-gray-300 rounded-lg py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                    className="w-full border border-gray-300 rounded-lg py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400"
                     autoComplete="off"
                   />
                 </div>
@@ -5054,7 +5075,7 @@
                         key={log.id}
                         className={`border rounded-lg p-4 cursor-pointer transition-colors ${
                           activeSearchId === log.id
-                            ? "border-indigo-300 bg-indigo-50"
+                            ? "border-sky-300 bg-sky-50"
                             : "border-gray-200"
                         }`}
                         onClick={() => handleHistorySelect(log.id)}
@@ -5095,7 +5116,7 @@
                           </p>
                         )}
                         {log.isPremium && (
-                          <p className="text-sm text-indigo-700 font-semibold">Transport premium</p>
+                          <p className="text-sm text-sky-700 font-semibold">Transport premium</p>
                         )}
                         {log.difference !== null && log.difference !== undefined && (
                           <p className="text-sm text-gray-700">
@@ -5180,7 +5201,7 @@
                     <div className="mt-4">
                       <button
                         onClick={() => setShowAllLogs((prev) => !prev)}
-                        className="text-sm text-indigo-600 hover:text-indigo-800"
+                        className="text-sm text-sky-600 hover:text-sky-800"
                       >
                         {showAllLogs ? "Voir moins" : "Voir plus"}
                       </button>
