@@ -85,14 +85,20 @@
 
       function EloyLogo({ compact = false }) {
         return (
-          <div className={`flex items-center ${compact ? "gap-2" : "gap-3"}`}>
-            <img
-              src={ELOY_LOGO_URL}
-              alt="Logo Eloy"
-              className={`shrink-0 object-contain ${
-                compact ? "h-10 w-10" : "h-14 w-14"
+          <div className="flex items-center justify-center">
+            <div
+              className={`rounded-xl bg-white/95 ring-1 ring-sky-200 shadow-md ${
+                compact ? "p-2" : "p-3"
               }`}
-            />
+            >
+              <img
+                src={ELOY_LOGO_URL}
+                alt="Logo Eloy"
+                className={`shrink-0 object-contain ${
+                  compact ? "h-14 w-14" : "h-28 w-28"
+                }`}
+              />
+            </div>
           </div>
         );
       }
